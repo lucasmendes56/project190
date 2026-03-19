@@ -1,8 +1,6 @@
 import { isToday, isPast, isFuture } from '../../utils/dateUtils'
-import { isWorkoutDay } from '../../utils/programUtils'
 
-export default function DayCell({ dateStr, completed, programStartDate }) {
-  const isScheduled = isWorkoutDay(dateStr)
+export default function DayCell({ dateStr, completed, programStartDate, isScheduled = false }) {
   const past = isPast(dateStr)
   const todayCell = isToday(dateStr)
   const future = isFuture(dateStr)

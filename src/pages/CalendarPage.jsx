@@ -4,12 +4,12 @@ import PageWrapper from '../components/layout/PageWrapper'
 import DayCell from '../components/calendar/DayCell'
 import { PHASES } from '../data/program'
 import { programDates } from '../utils/dateUtils'
-import { getPhase } from '../utils/programUtils'
+import { getPhase, isScheduledWorkoutDay } from '../utils/programUtils'
 
 const DOW_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 
 export default function CalendarPage() {
-  const { settings, isCompletedDate, currentWeek } = useApp()
+  const { settings, isCompletedDate, currentWeek, scheduleOverrides } = useApp()
   const startDate = settings.programStartDate
 
   const weeks = useMemo(() => {
@@ -79,7 +79,12 @@ export default function CalendarPage() {
               </div>
               {dates.map(dateStr => (
                 <div key={dateStr} className="flex justify-center">
-                  <DayCell dateStr={dateStr} completed={isCompletedDate(dateStr)} programStartDate={startDate} />
+                  <DayCell
+                    dateStr={dateStr}
+                    completed={isCompletedDate(dateStr)}
+                    programStartDate={startDate}
+                    isScheduled={isScheduledWorkoutDay(dateStr, startDate, scheduleOverrides)}
+                  />
                 </div>
               ))}
             </div>

@@ -10,18 +10,39 @@ export function getPhase(weekNum) {
   return PHASES.find(p => p.weeks.includes(weekNum)) || PHASES[0]
 }
 
-// Core resolver: date + start date → full workout template (with sections), or null for rest day
-export function resolveWorkout(dateStr, startDateStr) {
-  const dow = dayOfWeek(dateStr)
+// Returns the effective workoutId for a date (override → DOW default → null)
+export function getEffectiveWorkoutId(dateStr, startDateStr, overrides = {}) {
+  const ov = overrides[dateStr]
+  if (ov === 'rest') return null
+  if (ov) return ov
   const weekNum = programWeek(startDateStr, dateStr)
   const phase = getPhase(weekNum)
+  if (!phase) return null
+  const dow = dayOfWeek(dateStr)
+  return PHASE_SCHEDULES[phase.id]?.[dow]?.id ?? null
+}
 
+// Core resolver: date + start date → full workout template (with sections), or null for rest day
+export function resolveWorkout(dateStr, startDateStr, overrides = {}) {
+  const weekNum = programWeek(startDateStr, dateStr)
+  const phase = getPhase(weekNum)
   if (!phase) return null
 
-  const schedule = PHASE_SCHEDULES[phase.id]
-  const dayTemplate = schedule?.[dow]
+  const ov = overrides[dateStr]
+  let dayTemplate
 
-  if (!dayTemplate) return null // rest day (Wed=3, Sun=0 not in any schedule)
+  if (ov === 'rest') {
+    return null
+  } else if (ov) {
+    // Find the template by workout id in this phase's schedule
+    const schedule = PHASE_SCHEDULES[phase.id]
+    dayTemplate = Object.values(schedule).find(t => t.id === ov)
+  } else {
+    const dow = dayOfWeek(dateStr)
+    dayTemplate = PHASE_SCHEDULES[phase.id]?.[dow]
+  }
+
+  if (!dayTemplate) return null // rest day
 
   // Hydrate exercise IDs with master exercise data
   const sections = dayTemplate.sections.map(section => ({
@@ -41,7 +62,12 @@ export function resolveWorkout(dateStr, startDateStr) {
   }
 }
 
-// Is this date a mandatory workout day? (Mon/Tue/Thu/Fri — not Sat optional, not Wed/Sun rest)
+// Is this date a scheduled workout day? (checks overrides first, then DOW default)
+export function isScheduledWorkoutDay(dateStr, startDateStr, overrides = {}) {
+  return getEffectiveWorkoutId(dateStr, startDateStr, overrides) !== null
+}
+
+// Deprecated shim — DOW-only check, no override support
 export function isWorkoutDay(dateStr) {
   const dow = dayOfWeek(dateStr)
   return [1, 2, 4, 5].includes(dow)
@@ -53,14 +79,18 @@ export function isAnyWorkoutDay(dateStr) {
   return [1, 2, 4, 5, 6].includes(dow)
 }
 
-// Returns next MANDATORY workout date from a given date
-export function nextWorkoutDate(fromDateStr) {
+// Returns next workout date from a given date, respecting overrides when startDateStr is provided
+export function nextWorkoutDate(fromDateStr, startDateStr = null, overrides = {}) {
   let check = fromDateStr
   for (let i = 1; i <= 7; i++) {
     const d = new Date(check)
     d.setDate(d.getDate() + 1)
     check = d.toISOString().split('T')[0]
-    if (isWorkoutDay(check)) return check
+    if (startDateStr) {
+      if (isScheduledWorkoutDay(check, startDateStr, overrides)) return check
+    } else {
+      if (isWorkoutDay(check)) return check
+    }
   }
   return null
 }

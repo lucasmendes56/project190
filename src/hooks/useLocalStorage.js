@@ -6,6 +6,11 @@ export function useLocalStorage(key, initialValue) {
       const item = localStorage.getItem(key)
       return item ? JSON.parse(item) : initialValue
     } catch {
+      // JSON.parse failed — data is corrupted in storage. Log visibly so this is never silent.
+      // ⚠️ For sacred keys (wt_log, wt_bodyweight) this means stored data is unreadable,
+      // NOT that it should be erased. The raw value remains in localStorage untouched until
+      // the next setValue call overwrites it. Do not add any localStorage.removeItem() here.
+      console.error(`useLocalStorage: failed to parse key "${key}" — returning default`)
       return initialValue
     }
   })

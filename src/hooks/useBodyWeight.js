@@ -3,6 +3,9 @@ import { useLocalStorage } from './useLocalStorage'
 import { today } from '../utils/dateUtils'
 
 export function useBodyWeight() {
+  // ⚠️ SACRED KEY — 'wt_bodyweight' stores all bodyweight history.
+  // Never auto-clear, reset, or overwrite on app startup, version bump, or config change.
+  // The only legitimate call to clearWeights() is from Settings > Danger Zone after explicit user confirmation.
   const [entries, setEntries] = useLocalStorage('wt_bodyweight', [])
 
   const logWeight = useCallback((weight, dateStr = today()) => {

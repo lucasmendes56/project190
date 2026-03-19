@@ -4,6 +4,7 @@ import { useWorkoutLog } from '../hooks/useWorkoutLog'
 import { useStreak } from '../hooks/useStreak'
 import { useBodyWeight } from '../hooks/useBodyWeight'
 import { useProgram } from '../hooks/useProgram'
+import { useSchedule } from '../hooks/useSchedule'
 
 const AppContext = createContext(null)
 
@@ -15,11 +16,21 @@ const DEFAULT_SETTINGS = {
 }
 
 export function AppProvider({ children }) {
+  // localStorage key inventory:
+  //   'wt_settings'    — program config (start date, weights, name). Safe to reset.
+  //   'wt_log'         — ⚠️ SACRED: all workout history. Only cleared by explicit user action below.
+  //   'wt_bodyweight'  — ⚠️ SACRED: all bodyweight entries. Only cleared by explicit user action below.
+  //   'wt_schedule'    — schedule overrides (swap state). Reset on full data wipe.
+  //
+  // If the data schema for wt_log or wt_bodyweight needs to change, write a forward-only migration
+  // that preserves all existing records and adds new fields with safe defaults. Never destructively
+  // overwrite or reinitialize these keys during startup, hot-reload, or any config change.
   const [settings, setSettings, clearSettings] = useLocalStorage('wt_settings', DEFAULT_SETTINGS)
   const workoutLog = useWorkoutLog()
   const bodyWeight = useBodyWeight()
   const { streak, longestStreak } = useStreak(workoutLog.log, settings.programStartDate)
-  const program = useProgram(settings.programStartDate)
+  const { scheduleOverrides, swapWorkouts } = useSchedule(settings.programStartDate)
+  const program = useProgram(settings.programStartDate, scheduleOverrides)
 
   // Active session: in-memory until workout is finished
   const [activeSession, setActiveSession] = useState(null)
@@ -28,10 +39,13 @@ export function AppProvider({ children }) {
     setSettings(prev => ({ ...prev, ...updates }))
   }, [setSettings])
 
+  // ⚠️ resetAllData is ONLY called from Settings > Danger Zone after explicit double-confirmation.
+  // Do NOT call this from any initialization path, migration, or version bump.
   const resetAllData = useCallback(() => {
     clearSettings()
     workoutLog.clearLog()
     bodyWeight.clearWeights()
+    localStorage.removeItem('wt_schedule') // clear dangling overrides alongside full reset
     setActiveSession(null)
   }, [clearSettings, workoutLog, bodyWeight])
 
@@ -52,6 +66,9 @@ export function AppProvider({ children }) {
       longestStreak,
       // Program
       ...program,
+      // Schedule overrides
+      scheduleOverrides,
+      swapWorkouts,
       // Active session
       activeSession,
       setActiveSession,

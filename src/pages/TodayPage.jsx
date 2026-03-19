@@ -31,11 +31,14 @@ export default function TodayPage() {
     addEntry,
     isCompletedDate,
     getLastWeightForExercise,
+    getWeightForExerciseInWeek,
     getTodayEntry,
     isProgramComplete,
     activeSession,
     setActiveSession,
     settings,
+    scheduleOverrides,
+    swapWorkouts,
   } = useApp()
 
   const todayStr = today()
@@ -51,8 +54,8 @@ export default function TodayPage() {
   // Resolve workout for the selected date (for preview)
   const previewWorkout = useMemo(() => {
     if (!settings.programStartDate) return null
-    return resolveWorkout(selectedDate, settings.programStartDate)
-  }, [selectedDate, settings.programStartDate])
+    return resolveWorkout(selectedDate, settings.programStartDate, scheduleOverrides)
+  }, [selectedDate, settings.programStartDate, scheduleOverrides])
 
   // Build workouts map for DayNav labels — 7-day window centered on today
   const dayNavWorkouts = useMemo(() => {
@@ -60,10 +63,10 @@ export default function TodayPage() {
     return Object.fromEntries(
       Array.from({ length: 7 }, (_, i) => {
         const d = addDays(todayStr, i - 3)
-        return [d, resolveWorkout(d, settings.programStartDate)]
+        return [d, resolveWorkout(d, settings.programStartDate, scheduleOverrides)]
       })
     )
-  }, [settings.programStartDate, todayStr])
+  }, [settings.programStartDate, todayStr, scheduleOverrides])
 
   const previewCompleted = isCompletedDate(selectedDate)
 
@@ -109,7 +112,8 @@ export default function TodayPage() {
     })
   }
 
-  function handleDoToday(borrowedWorkout) {
+  function handleDoToday(borrowedWorkout, fromDate) {
+    if (fromDate && fromDate !== todayStr) swapWorkouts(todayStr, fromDate)
     const sections = borrowedWorkout.sections.map(section => ({
       sectionId: section.id,
       exercises: section.exercises.map(ex => ({
@@ -202,7 +206,7 @@ export default function TodayPage() {
           <WorkoutPreview
             workout={previewWorkout}
             completed={previewCompleted}
-            onDoToday={handleDoToday}
+            onDoToday={(workout) => handleDoToday(workout, selectedDate)}
           />
         ) : (
           <div>
@@ -299,6 +303,7 @@ export default function TodayPage() {
                             sets={sessionEx.sets}
                             onSetsChange={(sets) => updateExerciseSets(sectionTemplate.id, exTemplate.id, sets)}
                             lastWeight={getLastWeightForExercise(exTemplate.id)}
+                            lastWeekWeight={currentWeek > 1 ? getWeightForExerciseInWeek(exTemplate.id, currentWeek - 1) : null}
                           />
                         )
                       })}
@@ -347,24 +352,17 @@ export default function TodayPage() {
 }
 
 function WorkoutPicker({ workouts, onSelect, label = 'START A WORKOUT' }) {
-  const items = Object.values(workouts).filter(Boolean)
-  // Dedupe by workout id
-  const seen = new Set()
-  const unique = items.filter(w => {
-    if (seen.has(w.id)) return false
-    seen.add(w.id)
-    return true
-  })
-  if (unique.length === 0) return null
+  const items = Object.entries(workouts).filter(([, w]) => Boolean(w))
+  if (items.length === 0) return null
 
   return (
     <div className="mt-2">
       <p className="text-[10px] font-mono font-bold tracking-[0.4em] uppercase text-muted mb-3">{label}</p>
       <div className="space-y-1.5">
-        {unique.map(workout => (
+        {items.map(([dateStr, workout]) => (
           <button
-            key={workout.id}
-            onClick={() => onSelect(workout)}
+            key={dateStr}
+            onClick={() => onSelect(workout, dateStr)}
             className="w-full flex items-center justify-between border px-4 py-4 text-left active:opacity-60 transition-opacity"
             style={{ borderColor: '#1a1a1a', background: '#0d0d0d' }}
           >

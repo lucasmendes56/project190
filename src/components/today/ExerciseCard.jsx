@@ -1,6 +1,6 @@
 import SetRow from './SetRow'
 
-export default function ExerciseCard({ exercise, sets, onSetsChange, lastWeight }) {
+export default function ExerciseCard({ exercise, sets, onSetsChange, lastWeight, lastWeekWeight }) {
   const completedCount = sets.filter(s => s.completed).length
   const allDone = completedCount === sets.length && sets.length > 0
 
@@ -39,6 +39,11 @@ export default function ExerciseCard({ exercise, sets, onSetsChange, lastWeight 
 
       {/* Sets */}
       <div className="px-4 pb-4 space-y-2">
+        {lastWeekWeight != null && (
+          <p className="text-xs font-mono text-muted mb-1">
+            LAST WEEK: <span className="text-primary font-bold">{lastWeekWeight === 0 ? 'BW' : `${lastWeekWeight}LBS`}</span>
+          </p>
+        )}
         {lastWeight != null && (
           <p className="text-xs font-mono text-muted mb-1">
             LAST: <span className="text-primary font-bold">{lastWeight === 0 ? 'BW' : `${lastWeight}LBS`}</span>
