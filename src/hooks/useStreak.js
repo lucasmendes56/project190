@@ -1,8 +1,10 @@
 import { useMemo } from 'react'
 import { today, subtractDays } from '../utils/dateUtils'
-import { isWorkoutDay } from '../utils/programUtils'
+import { isScheduledWorkoutDay } from '../utils/programUtils'
 
-export function useStreak(log, programStartDate) {
+// scheduleOverrides required so streak counts against the actual assigned schedule,
+// not a hardcoded DOW pattern.
+export function useStreak(log, programStartDate, scheduleOverrides = {}) {
   const streak = useMemo(() => {
     if (!programStartDate || log.length === 0) return 0
 
@@ -14,28 +16,26 @@ export function useStreak(log, programStartDate) {
 
     // If today is a workout day but not yet completed, start checking from yesterday
     // (don't penalize for not completing today's workout yet)
-    if (isWorkoutDay(todayStr) && !completedDates.has(todayStr)) {
+    if (isScheduledWorkoutDay(todayStr, programStartDate, scheduleOverrides) && !completedDates.has(todayStr)) {
       checkDate = subtractDays(todayStr, 1)
     }
 
-    // Walk backwards, counting completed workout days, skipping rest days
+    // Walk backwards counting completed workout days, breaking on any missed day
     for (let i = 0; i < 90; i++) {
       if (checkDate < programStartDate) break
 
-      if (isWorkoutDay(checkDate)) {
+      if (isScheduledWorkoutDay(checkDate, programStartDate, scheduleOverrides)) {
         if (completedDates.has(checkDate)) {
           count++
         } else {
-          // Missed a workout day — streak broken
           break
         }
       }
-      // Rest days are skipped (don't break streak)
       checkDate = subtractDays(checkDate, 1)
     }
 
     return count
-  }, [log, programStartDate])
+  }, [log, programStartDate, scheduleOverrides])
 
   const longestStreak = useMemo(() => {
     if (!programStartDate || log.length === 0) return 0
@@ -46,10 +46,9 @@ export function useStreak(log, programStartDate) {
     let maxStreak = 0
     let current = 0
 
-    // Go through all days from start to today
     let checkDate = programStartDate
     while (checkDate <= todayStr) {
-      if (isWorkoutDay(checkDate)) {
+      if (isScheduledWorkoutDay(checkDate, programStartDate, scheduleOverrides)) {
         if (completedDates.has(checkDate)) {
           current++
           maxStreak = Math.max(maxStreak, current)
@@ -57,14 +56,13 @@ export function useStreak(log, programStartDate) {
           current = 0
         }
       }
-      // Advance by 1 day
       const d = new Date(checkDate)
       d.setDate(d.getDate() + 1)
       checkDate = d.toISOString().split('T')[0]
     }
 
     return maxStreak
-  }, [log, programStartDate])
+  }, [log, programStartDate, scheduleOverrides])
 
   return { streak, longestStreak }
 }

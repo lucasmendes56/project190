@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import PageWrapper from '../components/layout/PageWrapper'
 import StreakBadge from '../components/streak/StreakBadge'
@@ -33,16 +33,32 @@ export default function TodayPage() {
     getLastWeightForExercise,
     getWeightForExerciseInWeek,
     getTodayEntry,
+    getEntryForDate,
+    log,
     isProgramComplete,
     activeSession,
     setActiveSession,
     settings,
     scheduleOverrides,
     swapWorkouts,
+    assignWorkout,
   } = useApp()
 
   const todayStr = today()
   const [selectedDate, setSelectedDate] = useState(todayStr)
+  /** 0 = DayNav centered on today; -1 = one week earlier, etc. */
+  const [dayNavWeekOffset, setDayNavWeekOffset] = useState(0)
+  const dayNavCenterDate = useMemo(() => addDays(todayStr, dayNavWeekOffset * 7), [todayStr, dayNavWeekOffset])
+
+  const handleDayNavWeekShift = useCallback((delta) => {
+    setDayNavWeekOffset(prev => Math.min(0, prev + delta))
+  }, [])
+
+  // Keep selected day on-screen when changing week strip
+  useEffect(() => {
+    const days = Array.from({ length: 7 }, (_, i) => addDays(dayNavCenterDate, i - 3))
+    setSelectedDate(sel => (days.includes(sel) ? sel : dayNavCenterDate))
+  }, [dayNavCenterDate])
   const [showComplete, setShowComplete] = useState(false)
   const [completedWorkoutName, setCompletedWorkoutName] = useState(null)
   const [activeWorkoutTemplate, setActiveWorkoutTemplate] = useState(null)
@@ -57,16 +73,27 @@ export default function TodayPage() {
     return resolveWorkout(selectedDate, settings.programStartDate, scheduleOverrides)
   }, [selectedDate, settings.programStartDate, scheduleOverrides])
 
-  // Build workouts map for DayNav labels — 7-day window centered on today
+  // Scheduled workouts for WorkoutPicker (same 7-day window as DayNav)
   const dayNavWorkouts = useMemo(() => {
     if (!settings.programStartDate) return {}
     return Object.fromEntries(
       Array.from({ length: 7 }, (_, i) => {
-        const d = addDays(todayStr, i - 3)
+        const d = addDays(dayNavCenterDate, i - 3)
         return [d, resolveWorkout(d, settings.programStartDate, scheduleOverrides)]
       })
     )
-  }, [settings.programStartDate, todayStr, scheduleOverrides])
+  }, [settings.programStartDate, dayNavCenterDate, scheduleOverrides])
+
+  // DayNav labels: logged workout names for the visible 7 days
+  const completedWorkoutLabels = useMemo(() => {
+    return Object.fromEntries(
+      Array.from({ length: 7 }, (_, i) => {
+        const d = addDays(dayNavCenterDate, i - 3)
+        const entry = getEntryForDate(d)
+        return [d, entry?.workoutName ?? null]
+      })
+    )
+  }, [dayNavCenterDate, log, getEntryForDate])
 
   const previewCompleted = isCompletedDate(selectedDate)
 
@@ -113,7 +140,12 @@ export default function TodayPage() {
   }
 
   function handleDoToday(borrowedWorkout, fromDate) {
-    if (fromDate && fromDate !== todayStr) swapWorkouts(todayStr, fromDate)
+    if (fromDate && fromDate !== todayStr) {
+      swapWorkouts(todayStr, fromDate)
+    } else if (!fromDate) {
+      // Unscheduled workout selected directly — assign it to today
+      assignWorkout(todayStr, borrowedWorkout.id)
+    }
     const sections = borrowedWorkout.sections.map(section => ({
       sectionId: section.id,
       exercises: section.exercises.map(ex => ({
@@ -188,16 +220,21 @@ export default function TodayPage() {
       <WeekStrip
         programStartDate={settings.programStartDate}
         currentWeek={currentWeek}
+        currentPhase={currentPhase}
         isCompletedDate={isCompletedDate}
+        scheduleOverrides={scheduleOverrides}
+        getEntryForDate={getEntryForDate}
       />
 
       {/* Day navigator */}
       <DayNav
-        centerDate={todayStr}
+        centerDate={dayNavCenterDate}
         selectedDate={selectedDate}
         onSelect={setSelectedDate}
         isCompletedDate={isCompletedDate}
-        workouts={dayNavWorkouts}
+        completedWorkoutLabels={completedWorkoutLabels}
+        onWeekShift={handleDayNavWeekShift}
+        weekOffsetFromToday={dayNavWeekOffset}
       />
 
       {/* ── PREVIEW MODE: viewing another day ── */}

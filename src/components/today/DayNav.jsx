@@ -1,23 +1,56 @@
+import { useRef } from 'react'
 import { addDays, isToday, dayOfWeek } from '../../utils/dateUtils'
+import { shortWorkoutNavLabel } from '../../utils/workoutLabels'
 
 const DOW_SHORT = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
+const SWIPE_THRESHOLD_PX = 50
 
-// Shows 7 days: 3 before today → today → 3 ahead. Any day is selectable.
-export default function DayNav({ centerDate, selectedDate, onSelect, isCompletedDate, workouts }) {
+// Shows 7 days centered on `centerDate`. Swipe right → previous week, swipe left → toward current (via onWeekShift).
+// `completedWorkoutLabels`: dateStr → workoutName from log only (never from program schedule).
+export default function DayNav({
+  centerDate,
+  selectedDate,
+  onSelect,
+  isCompletedDate,
+  completedWorkoutLabels,
+  onWeekShift,
+  weekOffsetFromToday,
+}) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(centerDate, i - 3))
+  const touchStartX = useRef(null)
+
+  function handleTouchStart(e) {
+    touchStartX.current = e.touches[0].clientX
+  }
+
+  function handleTouchEnd(e) {
+    if (touchStartX.current == null || !onWeekShift) return
+    const endX = e.changedTouches[0].clientX
+    const dx = endX - touchStartX.current
+    touchStartX.current = null
+    if (dx > SWIPE_THRESHOLD_PX) onWeekShift(-1)
+    else if (dx < -SWIPE_THRESHOLD_PX) onWeekShift(1)
+  }
 
   return (
-    <div className="flex gap-1 mb-4 overflow-x-auto no-scrollbar -mx-4 px-4">
+    <div className="mb-4 -mx-4 px-4">
+      <p className="text-[9px] font-mono text-muted text-center mb-2 tracking-widest">
+        {weekOffsetFromToday < 0 ? 'Past week — swipe left to return' : 'Swipe right for previous weeks'}
+      </p>
+      <div
+        className="flex gap-1 overflow-x-auto no-scrollbar touch-pan-y"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        style={{ WebkitOverflowScrolling: 'touch' }}
+      >
       {days.map(dateStr => {
         const isSelected = selectedDate === dateStr
         const todayCell = isToday(dateStr)
         const completed = isCompletedDate(dateStr)
         const dow = dayOfWeek(dateStr)
         const dayNum = parseInt(dateStr.split('-')[2])
-        const workout = workouts?.[dateStr]
-        const shortName = workout
-          ? workout.name.split(' + ')[0].split(' ')[0].toUpperCase().slice(0, 4)
-          : '—'
+        const loggedName = completedWorkoutLabels?.[dateStr]
+        const shortName = loggedName ? shortWorkoutNavLabel(loggedName) : ''
 
         return (
           <button
@@ -42,10 +75,10 @@ export default function DayNav({ centerDate, selectedDate, onSelect, isCompleted
               {dayNum}
             </span>
             <span
-              className="text-[8px] font-mono mt-0.5"
-              style={{ color: isSelected ? '#DC2626' : '#333' }}
+              className="text-[8px] font-mono mt-0.5 min-h-[10px]"
+              style={{ color: isSelected ? '#DC2626' : shortName ? '#555' : 'transparent' }}
             >
-              {shortName}
+              {shortName || '\u00a0'}
             </span>
             {completed && (
               <span className="w-1 h-1 mt-0.5" style={{ background: '#DC2626' }} />
@@ -53,6 +86,7 @@ export default function DayNav({ centerDate, selectedDate, onSelect, isCompleted
           </button>
         )
       })}
+      </div>
     </div>
   )
 }

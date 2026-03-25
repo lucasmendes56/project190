@@ -1,7 +1,10 @@
 // 12-week mass building program
-// dayOfWeek: 0=Sun, 1=Mon, 2=Tue, 3=Wed(rest), 4=Thu, 5=Fri, 6=Sat(optional), 0=Sun(rest)
 //
-// Split changes per phase:
+// Workout templates are keyed by DOW (0–6) solely for migration / default-plan generation.
+// The runtime schedule (wt_schedule v2) stores fully explicit date→workoutId assignments;
+// no DOW lookup ever happens at runtime. Users can assign any workout to any day.
+//
+// Default split per phase (used only when generating a new week's initial plan):
 //   Phase 1: Mon=Chest+Tris  Tue=Back+Bis  Thu=Shoulders+Arms  Fri=Legs+Bis   Sat=Optional Arms
 //   Phase 2: Mon=Chest+Tris  Tue=Back+Bis  Thu=Legs+Tris       Fri=Shoulders+Arms  Sat=Optional
 //   Phase 3: Mon=Chest+Tris  Tue=Legs+Bis  Thu=Shoulders+Arms  Fri=Back+Deadlift   Sat=Optional Arms

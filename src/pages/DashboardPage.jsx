@@ -6,7 +6,7 @@ import WeightEntryForm from '../components/dashboard/WeightEntryForm'
 import PhaseTag from '../components/shared/PhaseTag'
 import ProgressRing from '../components/shared/ProgressRing'
 import { formatDate, today, programDates, isPast, isToday } from '../utils/dateUtils'
-import { isWorkoutDay } from '../utils/programUtils'
+import { isScheduledWorkoutDay } from '../utils/programUtils'
 
 function SectionLabel({ children }) {
   return (
@@ -33,6 +33,7 @@ export default function DashboardPage() {
     longestStreak,
     currentWeek,
     currentPhase,
+    scheduleOverrides,
   } = useApp()
 
   const totalWorkouts = log.length
@@ -41,7 +42,7 @@ export default function DashboardPage() {
     if (!settings.programStartDate) return null
     const completedDates = new Set(log.map(e => e.date))
     const allDates = programDates(settings.programStartDate)
-    const scheduledPast = allDates.filter(d => (isPast(d) || isToday(d)) && isWorkoutDay(d))
+    const scheduledPast = allDates.filter(d => (isPast(d) || isToday(d)) && isScheduledWorkoutDay(d, settings.programStartDate, scheduleOverrides))
     if (scheduledPast.length === 0) return null
     const hit = scheduledPast.filter(d => completedDates.has(d)).length
     return Math.round((hit / scheduledPast.length) * 100)

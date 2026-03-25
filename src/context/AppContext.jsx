@@ -20,7 +20,8 @@ export function AppProvider({ children }) {
   //   'wt_settings'    — program config (start date, weights, name). Safe to reset.
   //   'wt_log'         — ⚠️ SACRED: all workout history. Only cleared by explicit user action below.
   //   'wt_bodyweight'  — ⚠️ SACRED: all bodyweight entries. Only cleared by explicit user action below.
-  //   'wt_schedule'    — schedule overrides (swap state). Reset on full data wipe.
+  //   'wt_schedule'    — explicit weekly assignments (v2 flat map). Reset on full data wipe.
+  //                      Migration from v1 (DOW overrides) runs automatically in useSchedule.
   //
   // If the data schema for wt_log or wt_bodyweight needs to change, write a forward-only migration
   // that preserves all existing records and adds new fields with safe defaults. Never destructively
@@ -28,8 +29,8 @@ export function AppProvider({ children }) {
   const [settings, setSettings, clearSettings] = useLocalStorage('wt_settings', DEFAULT_SETTINGS)
   const workoutLog = useWorkoutLog()
   const bodyWeight = useBodyWeight()
-  const { streak, longestStreak } = useStreak(workoutLog.log, settings.programStartDate)
-  const { scheduleOverrides, swapWorkouts } = useSchedule(settings.programStartDate)
+  const { scheduleOverrides, swapWorkouts, assignWorkout, unassignWorkout } = useSchedule(settings.programStartDate)
+  const { streak, longestStreak } = useStreak(workoutLog.log, settings.programStartDate, scheduleOverrides)
   const program = useProgram(settings.programStartDate, scheduleOverrides)
 
   // Active session: in-memory until workout is finished
@@ -45,7 +46,7 @@ export function AppProvider({ children }) {
     clearSettings()
     workoutLog.clearLog()
     bodyWeight.clearWeights()
-    localStorage.removeItem('wt_schedule') // clear dangling overrides alongside full reset
+    localStorage.removeItem('wt_schedule')
     setActiveSession(null)
   }, [clearSettings, workoutLog, bodyWeight])
 
@@ -66,9 +67,11 @@ export function AppProvider({ children }) {
       longestStreak,
       // Program
       ...program,
-      // Schedule overrides
+      // Schedule
       scheduleOverrides,
       swapWorkouts,
+      assignWorkout,
+      unassignWorkout,
       // Active session
       activeSession,
       setActiveSession,
