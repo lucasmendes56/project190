@@ -10,7 +10,7 @@ import DayNav from '../components/today/DayNav'
 import WorkoutPreview from '../components/today/WorkoutPreview'
 import WorkoutCompleteModal from '../components/complete/WorkoutCompleteModal'
 import { formatDate, formatDayName, today, addDays } from '../utils/dateUtils'
-import { parseMinReps, resolveWorkout } from '../utils/programUtils'
+import { parseMinReps, resolveWorkout, getWorkoutSlots } from '../utils/programUtils'
 import { REST_DAY_MESSAGES } from '../data/program'
 
 function buildInitialSets(exercise, lastWeight) {
@@ -62,6 +62,8 @@ export default function TodayPage() {
   const [showComplete, setShowComplete] = useState(false)
   const [completedWorkoutName, setCompletedWorkoutName] = useState(null)
   const [activeWorkoutTemplate, setActiveWorkoutTemplate] = useState(null)
+  const [showChangePicker, setShowChangePicker] = useState(false)
+  const [changePickerDate, setChangePickerDate] = useState(null)
 
   const alreadyDone = isCompletedDate(todayStr)
   const todayEntry = getTodayEntry()
@@ -165,6 +167,34 @@ export default function TodayPage() {
     setSelectedDate(todayStr)
   }
 
+  function openChangePicker(dateStr) {
+    setChangePickerDate(dateStr)
+    setShowChangePicker(true)
+  }
+
+  function handleChangeWorkout(newWorkoutId) {
+    const dateStr = changePickerDate
+    assignWorkout(dateStr, newWorkoutId)
+    // If changing today's active workout, rebuild the session
+    if (dateStr === todayStr) {
+      const newWorkout = resolveWorkout(dateStr, settings.programStartDate, { _v: 2, [dateStr]: newWorkoutId })
+      if (newWorkout) {
+        const sections = newWorkout.sections.map(section => ({
+          sectionId: section.id,
+          exercises: section.exercises.map(ex => ({
+            id: ex.id,
+            name: ex.name,
+            sets: buildInitialSets(ex, getLastWeightForExercise(ex.id)),
+          })),
+        }))
+        setActiveSession({ date: todayStr, workoutId: newWorkoutId, workoutName: newWorkout.name, sections, abCompleted: [] })
+        setActiveWorkoutTemplate(newWorkout)
+      }
+    }
+    setShowChangePicker(false)
+    setChangePickerDate(null)
+  }
+
   function finishWorkout() {
     if (!activeSession) return
     const allExercises = activeSession.sections.flatMap(s =>
@@ -240,11 +270,22 @@ export default function TodayPage() {
       {/* ── PREVIEW MODE: viewing another day ── */}
       {!isViewingToday && (
         previewWorkout ? (
-          <WorkoutPreview
-            workout={previewWorkout}
-            completed={previewCompleted}
-            onDoToday={(workout) => handleDoToday(workout, selectedDate)}
-          />
+          <>
+            <WorkoutPreview
+              workout={previewWorkout}
+              completed={previewCompleted}
+              onDoToday={(workout) => handleDoToday(workout, selectedDate)}
+            />
+            {!previewCompleted && (
+              <button
+                onClick={() => openChangePicker(selectedDate)}
+                className="w-full text-[10px] font-mono font-bold tracking-widest uppercase py-3 active:opacity-60"
+                style={{ color: '#333' }}
+              >
+                CHANGE THIS DAY'S WORKOUT
+              </button>
+            )}
+          </>
         ) : (
           <div>
             <div className="text-center py-8">
@@ -291,9 +332,20 @@ export default function TodayPage() {
           {/* Active workout */}
           {activeWorkoutTemplate && activeSession && (
             <>
-              <div className="mb-5">
-                <h1 className="text-lg font-mono font-black text-white uppercase tracking-wide">{activeWorkoutTemplate.name}</h1>
-                {currentPhase && <p className="text-[10px] font-mono text-muted mt-0.5 tracking-widest">{currentPhase.tip}</p>}
+              <div className="mb-5 flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <h1 className="text-lg font-mono font-black text-white uppercase tracking-wide">{activeWorkoutTemplate.name}</h1>
+                  {currentPhase && <p className="text-[10px] font-mono text-muted mt-0.5 tracking-widest">{currentPhase.tip}</p>}
+                </div>
+                {!alreadyDone && (
+                  <button
+                    onClick={() => openChangePicker(todayStr)}
+                    className="flex-shrink-0 text-[9px] font-mono font-bold tracking-widest uppercase border px-2.5 py-1.5 active:opacity-60"
+                    style={{ borderColor: '#1a1a1a', color: '#444' }}
+                  >
+                    CHANGE
+                  </button>
+                )}
               </div>
 
               {/* Progress bar */}
@@ -377,6 +429,19 @@ export default function TodayPage() {
         </>
       )}
 
+      {showChangePicker && currentPhase && (
+        <WorkoutChangePicker
+          phaseId={currentPhase.id}
+          phaseName={currentPhase.name}
+          currentWorkoutId={changePickerDate === todayStr ? activeWorkoutTemplate?.id : previewWorkout?.id}
+          programStartDate={settings.programStartDate}
+          dateStr={changePickerDate}
+          scheduleOverrides={scheduleOverrides}
+          onSelect={handleChangeWorkout}
+          onClose={() => { setShowChangePicker(false); setChangePickerDate(null) }}
+        />
+      )}
+
       {showComplete && (
         <WorkoutCompleteModal
           streak={streak}
@@ -385,6 +450,59 @@ export default function TodayPage() {
         />
       )}
     </PageWrapper>
+  )
+}
+
+function WorkoutChangePicker({ phaseId, phaseName, currentWorkoutId, onSelect, onClose }) {
+  const { mandatory, optional } = getWorkoutSlots(phaseId)
+  const all = [...mandatory, ...(optional ? [optional] : [])]
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col justify-end"
+      style={{ background: 'rgba(0,0,0,0.85)' }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full p-5 pb-8"
+        style={{ background: '#0d0d0d', borderTop: '1px solid #1a1a1a' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-[10px] font-mono font-bold tracking-[0.4em] uppercase" style={{ color: '#DC2626' }}>
+            CHANGE WORKOUT — {phaseName}
+          </p>
+          <button onClick={onClose} className="text-muted text-xs font-mono">✕</button>
+        </div>
+        <div className="space-y-2">
+          {all.map(w => (
+            <button
+              key={w.id}
+              onClick={() => onSelect(w.id)}
+              className="w-full flex items-center justify-between border px-4 py-3 text-left active:opacity-60"
+              style={{
+                borderColor: w.id === currentWorkoutId ? '#DC2626' : '#1a1a1a',
+                background: w.id === currentWorkoutId ? '#0a0000' : '#000',
+              }}
+            >
+              <div>
+                <p className="text-sm font-mono font-bold uppercase tracking-wide"
+                  style={{ color: w.id === currentWorkoutId ? '#DC2626' : '#fff' }}>
+                  {w.name}
+                  {w.optional && <span className="ml-2 text-[9px] text-muted normal-case">(optional)</span>}
+                </p>
+                <p className="text-[10px] font-mono mt-0.5" style={{ color: '#333' }}>
+                  {w.sections?.flatMap(s => s.exercises).length ?? 0} EXERCISES
+                </p>
+              </div>
+              {w.id === currentWorkoutId && (
+                <span className="text-[9px] font-mono font-bold tracking-widest" style={{ color: '#DC2626' }}>NOW</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
 

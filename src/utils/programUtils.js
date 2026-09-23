@@ -154,3 +154,78 @@ export function parseMinReps(repsStr) {
   const match = str.match(/\d+/)
   return match ? parseInt(match[0]) : 10
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Flexible week pattern — any-day-start & custom workout ordering
+// ─────────────────────────────────────────────────────────────────
+//
+// A week pattern is a 7-element array for day offsets 0–6 within each program week.
+// Values:
+//   0,1,2,3    = index into the mandatory workout list for the current phase
+//   'optional' = the phase's optional workout
+//   null       = rest day
+//
+// Default mirrors the original Mon/Tue/Rest/Thu/Fri/Sat/Sun split.
+export const DEFAULT_WEEK_PATTERN = [0, 1, null, 2, 3, 'optional', null]
+
+// Returns { mandatory, optional } workout templates for a given phase
+export function getWorkoutSlots(phaseId) {
+  const schedule = PHASE_SCHEDULES[phaseId]
+  if (!schedule) return { mandatory: [], optional: null }
+  const mandatory = Object.values(schedule).filter(w => w && !w.optional)
+  const optional = Object.values(schedule).find(w => w?.optional) ?? null
+  return { mandatory, optional }
+}
+
+// Generate a complete 12-week v2 schedule from a week pattern
+export function generateScheduleFromPattern(programStartDate, weekPattern = DEFAULT_WEEK_PATTERN) {
+  if (!programStartDate) return { _v: 2 }
+  const result = { _v: 2 }
+  for (let week = 1; week <= 12; week++) {
+    const weekStartDate = addDays(programStartDate, (week - 1) * 7)
+    const phase = getPhase(week)
+    if (!phase) continue
+    const phaseSchedule = PHASE_SCHEDULES[phase.id]
+    const mandatory = Object.values(phaseSchedule).filter(w => w && !w.optional)
+    const optional = Object.values(phaseSchedule).find(w => w?.optional) ?? null
+    for (let i = 0; i < 7; i++) {
+      const dateStr = addDays(weekStartDate, i)
+      const slot = weekPattern[i]
+      if (slot === null || slot === undefined) continue
+      if (slot === 'optional') {
+        if (optional) result[dateStr] = optional.id
+      } else {
+        const workout = mandatory[slot]
+        if (workout) result[dateStr] = workout.id
+      }
+    }
+  }
+  return result
+}
+
+// Regenerate schedule from a given week number onward, leaving earlier weeks untouched
+export function regenerateFutureSchedule(programStartDate, weekPattern, currentSchedule, fromWeekNum) {
+  const result = { ...currentSchedule }
+  for (let week = fromWeekNum; week <= 12; week++) {
+    const weekStartDate = addDays(programStartDate, (week - 1) * 7)
+    // Clear existing assignments for this week
+    for (let i = 0; i < 7; i++) delete result[addDays(weekStartDate, i)]
+    const phase = getPhase(week)
+    if (!phase) continue
+    const phaseSchedule = PHASE_SCHEDULES[phase.id]
+    const mandatory = Object.values(phaseSchedule).filter(w => w && !w.optional)
+    const optional = Object.values(phaseSchedule).find(w => w?.optional) ?? null
+    for (let i = 0; i < 7; i++) {
+      const dateStr = addDays(weekStartDate, i)
+      const slot = weekPattern[i]
+      if (slot === null || slot === undefined) continue
+      if (slot === 'optional') {
+        if (optional) result[dateStr] = optional.id
+      } else {
+        const workout = mandatory[slot]
+        if (workout) result[dateStr] = workout.id
+      }
+    }
+  }
+  return result
+}

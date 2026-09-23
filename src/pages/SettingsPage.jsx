@@ -2,15 +2,18 @@ import { useState } from 'react'
 import { useApp } from '../context/AppContext'
 import PageWrapper from '../components/layout/PageWrapper'
 import { today } from '../utils/dateUtils'
+import { DEFAULT_WEEK_PATTERN } from '../utils/programUtils'
+import WeekPatternEditor from '../components/shared/WeekPatternEditor'
 
 const inputClass = 'w-full border px-4 py-3 text-white text-sm font-mono focus:outline-none'
 const inputStyle = { background: '#000', borderColor: '#1a1a1a', caretColor: '#DC2626' }
 const labelClass = 'block text-[10px] font-mono font-bold tracking-[0.4em] uppercase text-muted mb-2'
 
 export default function SettingsPage() {
-  const { settings, updateSettings, resetAllData } = useApp()
+  const { settings, updateSettings, resetAllData, regenerateSchedule } = useApp()
   const [showConfirm, setShowConfirm] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [patternSaved, setPatternSaved] = useState(false)
 
   const [form, setForm] = useState({
     name: settings.name ?? '',
@@ -18,6 +21,10 @@ export default function SettingsPage() {
     startWeight: settings.startWeight ?? 175,
     targetWeight: settings.targetWeight ?? 190,
   })
+
+  const [weekPattern, setWeekPattern] = useState(
+    settings.weekPattern ?? DEFAULT_WEEK_PATTERN
+  )
 
   function handleChange(field, value) {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -32,6 +39,12 @@ export default function SettingsPage() {
     })
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
+  }
+
+  function handleApplyPattern() {
+    regenerateSchedule(weekPattern)
+    setPatternSaved(true)
+    setTimeout(() => setPatternSaved(false), 2000)
   }
 
   function handleReset() {
@@ -66,7 +79,6 @@ export default function SettingsPage() {
             className={inputClass}
             style={{ ...inputStyle, colorScheme: 'dark' }}
           />
-          <p className="text-xs font-mono text-muted mt-1.5">Must be a Monday</p>
         </div>
 
         <div>
@@ -103,13 +115,32 @@ export default function SettingsPage() {
         </button>
       </form>
 
+      {/* Weekly Split Editor */}
+      <div className="mt-6 border p-4" style={{ borderColor: '#1a1a1a', background: '#0d0d0d' }}>
+        <p className="text-[10px] font-mono font-bold tracking-[0.4em] uppercase text-muted mb-1">Weekly Split</p>
+        <p className="text-[10px] font-mono text-muted mb-4" style={{ color: '#333' }}>
+          Day 1 = program start day. Changes apply from the current week onward.
+        </p>
+        <WeekPatternEditor
+          pattern={weekPattern}
+          onChange={setWeekPattern}
+          phaseId="foundation"
+        />
+        <button
+          onClick={handleApplyPattern}
+          className="w-full border text-xs font-mono font-bold py-3 tracking-widest uppercase mt-4 active:opacity-70"
+          style={{ borderColor: '#1a1a1a', color: patternSaved ? '#DC2626' : '#555' }}
+        >
+          {patternSaved ? 'APPLIED' : 'APPLY TO ALL WEEKS'}
+        </button>
+      </div>
+
       {/* Program info */}
-      <div className="mt-8 border p-4" style={{ borderColor: '#1a1a1a', background: '#0d0d0d' }}>
+      <div className="mt-4 border p-4" style={{ borderColor: '#1a1a1a', background: '#0d0d0d' }}>
         <p className="text-[10px] font-mono font-bold tracking-[0.4em] uppercase text-muted mb-3">Program Info</p>
         <div className="space-y-1.5">
           {[
             '4 days/week · Mass gain focus',
-            'Mon / Tue / Thu / Fri — Core days (Sat optional)',
             'Ab circuit at end of every session (A, B, or C)',
             'Phase 1 (Weeks 1–4): Build the Habit · 45–55 min',
             'Phase 2 (Weeks 5–8): Build the Strength · 50–60 min',

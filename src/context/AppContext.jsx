@@ -5,6 +5,7 @@ import { useStreak } from '../hooks/useStreak'
 import { useBodyWeight } from '../hooks/useBodyWeight'
 import { useProgram } from '../hooks/useProgram'
 import { useSchedule } from '../hooks/useSchedule'
+import { DEFAULT_WEEK_PATTERN } from '../utils/programUtils'
 
 const AppContext = createContext(null)
 
@@ -13,6 +14,7 @@ const DEFAULT_SETTINGS = {
   startWeight: 175,
   targetWeight: 190,
   name: '',
+  weekPattern: DEFAULT_WEEK_PATTERN,
 }
 
 export function AppProvider({ children }) {
@@ -29,7 +31,7 @@ export function AppProvider({ children }) {
   const [settings, setSettings, clearSettings] = useLocalStorage('wt_settings', DEFAULT_SETTINGS)
   const workoutLog = useWorkoutLog()
   const bodyWeight = useBodyWeight()
-  const { scheduleOverrides, swapWorkouts, assignWorkout, unassignWorkout } = useSchedule(settings.programStartDate)
+  const { scheduleOverrides, swapWorkouts, assignWorkout, unassignWorkout, initializeSchedule } = useSchedule(settings.programStartDate)
   const { streak, longestStreak } = useStreak(workoutLog.log, settings.programStartDate, scheduleOverrides)
   const program = useProgram(settings.programStartDate, scheduleOverrides)
 
@@ -39,6 +41,13 @@ export function AppProvider({ children }) {
   const updateSettings = useCallback((updates) => {
     setSettings(prev => ({ ...prev, ...updates }))
   }, [setSettings])
+
+  // Rebuild the full 12-week schedule from a new week pattern and save it
+  const regenerateSchedule = useCallback((weekPattern) => {
+    if (!settings.programStartDate) return
+    updateSettings({ weekPattern })
+    initializeSchedule(settings.programStartDate, weekPattern)
+  }, [settings.programStartDate, updateSettings, initializeSchedule])
 
   // ⚠️ resetAllData is ONLY called from Settings > Danger Zone after explicit double-confirmation.
   // Do NOT call this from any initialization path, migration, or version bump.
@@ -72,6 +81,8 @@ export function AppProvider({ children }) {
       swapWorkouts,
       assignWorkout,
       unassignWorkout,
+      initializeSchedule,
+      regenerateSchedule,
       // Active session
       activeSession,
       setActiveSession,

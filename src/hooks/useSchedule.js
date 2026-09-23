@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from 'react'
 import { useLocalStorage } from './useLocalStorage'
-import { getEffectiveWorkoutId, migrateScheduleToV2 } from '../utils/programUtils'
+import { getEffectiveWorkoutId, migrateScheduleToV2, generateScheduleFromPattern } from '../utils/programUtils'
 
 export function useSchedule(programStartDate) {
   const [schedule, setSchedule] = useLocalStorage('wt_schedule', {})
@@ -43,5 +43,10 @@ export function useSchedule(programStartDate) {
     })
   }, [programStartDate, setSchedule])
 
-  return { scheduleOverrides: schedule, swapWorkouts, assignWorkout, unassignWorkout }
+  // Initialize a brand-new schedule from a week pattern (called from onboarding)
+  const initializeSchedule = useCallback((programStartDate, weekPattern) => {
+    setSchedule(generateScheduleFromPattern(programStartDate, weekPattern))
+  }, [setSchedule])
+
+  return { scheduleOverrides: schedule, swapWorkouts, assignWorkout, unassignWorkout, initializeSchedule }
 }
