@@ -22,7 +22,9 @@ export function useProgram(programStartDate, scheduleOverrides = {}) {
 
   const isProgramComplete = currentWeek !== null && currentWeek > 12
 
-  const isTodayWorkoutDay = isScheduledWorkoutDay(todayStr, programStartDate, scheduleOverrides)
+  const isTodayWorkoutDay = programStartDate
+    ? isScheduledWorkoutDay(todayStr, programStartDate, scheduleOverrides)
+    : false
 
   const nextWorkout = useMemo(() => {
     if (!programStartDate) return null

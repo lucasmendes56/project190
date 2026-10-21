@@ -24,6 +24,7 @@ export function AppProvider({ children }) {
   //   'wt_bodyweight'  — ⚠️ SACRED: all bodyweight entries. Only cleared by explicit user action below.
   //   'wt_schedule'    — explicit weekly assignments (v2 flat map). Reset on full data wipe.
   //                      Migration from v1 (DOW overrides) runs automatically in useSchedule.
+  //   'wt_last_backup' — when the last backup file was saved. Not workout data.
   //
   // If the data schema for wt_log or wt_bodyweight needs to change, write a forward-only migration
   // that preserves all existing records and adds new fields with safe defaults. Never destructively
