@@ -5,6 +5,7 @@ import StreakBadge from '../components/streak/StreakBadge'
 import PhaseTag from '../components/shared/PhaseTag'
 import ExerciseCard from '../components/today/ExerciseCard'
 import AbCircuitSection from '../components/today/AbCircuitSection'
+import SwapExerciseSheet from '../components/today/SwapExerciseSheet'
 import WeekStrip from '../components/today/WeekStrip'
 import DayNav from '../components/today/DayNav'
 import WorkoutPreview from '../components/today/WorkoutPreview'
@@ -12,6 +13,13 @@ import WorkoutCompleteModal from '../components/complete/WorkoutCompleteModal'
 import { formatDate, formatDayName, today, addDays } from '../utils/dateUtils'
 import { parseMinReps, resolveWorkout, getWorkoutSlots } from '../utils/programUtils'
 import { REST_DAY_MESSAGES } from '../data/program'
+import {
+  alternativesFor,
+  getCatalogExercise,
+  groupForExercise,
+  groupLabel,
+  swapRecord,
+} from '../data/exerciseSwaps'
 
 function buildInitialSets(exercise, lastWeight) {
   return Array.from({ length: exercise.sets }, () => ({
@@ -19,6 +27,17 @@ function buildInitialSets(exercise, lastWeight) {
     reps: parseMinReps(exercise.reps),
     completed: false,
   }))
+}
+
+function sessionExercise(ex, lastWeight) {
+  return {
+    programId: ex.programId || ex.id,
+    id: ex.id,
+    name: ex.name,
+    muscle: ex.muscle,
+    defaultWeight: ex.defaultWeight,
+    sets: buildInitialSets(ex, lastWeight),
+  }
 }
 
 export default function TodayPage() {
@@ -42,6 +61,11 @@ export default function TodayPage() {
     scheduleOverrides,
     swapWorkouts,
     assignWorkout,
+    exerciseSwaps,
+    customExercises,
+    saveExerciseSwap,
+    clearExerciseSwap,
+    rememberCustomExercise,
   } = useApp()
 
   const todayStr = today()
@@ -64,6 +88,7 @@ export default function TodayPage() {
   const [activeWorkoutTemplate, setActiveWorkoutTemplate] = useState(null)
   const [showChangePicker, setShowChangePicker] = useState(false)
   const [changePickerDate, setChangePickerDate] = useState(null)
+  const [swapRequest, setSwapRequest] = useState(null)
 
   const alreadyDone = isCompletedDate(todayStr)
   const todayEntry = getTodayEntry()
@@ -72,8 +97,8 @@ export default function TodayPage() {
   // Resolve workout for the selected date (for preview)
   const previewWorkout = useMemo(() => {
     if (!settings.programStartDate) return null
-    return resolveWorkout(selectedDate, settings.programStartDate, scheduleOverrides)
-  }, [selectedDate, settings.programStartDate, scheduleOverrides])
+    return resolveWorkout(selectedDate, settings.programStartDate, scheduleOverrides, exerciseSwaps)
+  }, [selectedDate, settings.programStartDate, scheduleOverrides, exerciseSwaps])
 
   // Scheduled workouts for WorkoutPicker (same 7-day window as DayNav)
   const dayNavWorkouts = useMemo(() => {
@@ -81,10 +106,10 @@ export default function TodayPage() {
     return Object.fromEntries(
       Array.from({ length: 7 }, (_, i) => {
         const d = addDays(dayNavCenterDate, i - 3)
-        return [d, resolveWorkout(d, settings.programStartDate, scheduleOverrides)]
+        return [d, resolveWorkout(d, settings.programStartDate, scheduleOverrides, exerciseSwaps)]
       })
     )
-  }, [settings.programStartDate, dayNavCenterDate, scheduleOverrides])
+  }, [settings.programStartDate, dayNavCenterDate, scheduleOverrides, exerciseSwaps])
 
   // DayNav labels: logged workout names for the visible 7 days
   const completedWorkoutLabels = useMemo(() => {
@@ -105,14 +130,10 @@ export default function TodayPage() {
 
     const sections = todayWorkout.sections.map(section => ({
       sectionId: section.id,
-      exercises: section.exercises.map(ex => ({
-        id: ex.id,
-        name: ex.name,
-        sets: buildInitialSets(ex, getLastWeightForExercise(ex.id)),
-      })),
+      exercises: section.exercises.map(ex => sessionExercise(ex, getLastWeightForExercise(ex.id))),
     }))
 
-    setActiveSession({ date: todayStr, workoutId: todayWorkout.id, sections, abCompleted: [] })
+    setActiveSession({ date: todayStr, workoutId: todayWorkout.id, sections, abCompleted: [], abSwaps: {} })
     setActiveWorkoutTemplate(todayWorkout)
   }, [todayWorkout?.id, alreadyDone])
 
@@ -123,12 +144,12 @@ export default function TodayPage() {
     }
   }, [activeSession, todayWorkout])
 
-  function updateExerciseSets(sectionId, exId, sets) {
+  function updateExerciseSets(sectionId, slotId, sets) {
     setActiveSession(prev => ({
       ...prev,
       sections: prev.sections.map(s =>
         s.sectionId === sectionId
-          ? { ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, sets } : e) }
+          ? { ...s, exercises: s.exercises.map(e => (e.programId || e.id) === slotId ? { ...e, sets } : e) }
           : s
       ),
     }))
@@ -150,11 +171,7 @@ export default function TodayPage() {
     }
     const sections = borrowedWorkout.sections.map(section => ({
       sectionId: section.id,
-      exercises: section.exercises.map(ex => ({
-        id: ex.id,
-        name: ex.name,
-        sets: buildInitialSets(ex, getLastWeightForExercise(ex.id)),
-      })),
+      exercises: section.exercises.map(ex => sessionExercise(ex, getLastWeightForExercise(ex.id))),
     }))
     setActiveSession({
       date: todayStr,
@@ -162,6 +179,7 @@ export default function TodayPage() {
       workoutName: borrowedWorkout.name,
       sections,
       abCompleted: [],
+      abSwaps: {},
     })
     setActiveWorkoutTemplate(borrowedWorkout)
     setSelectedDate(todayStr)
@@ -177,22 +195,121 @@ export default function TodayPage() {
     assignWorkout(dateStr, newWorkoutId)
     // If changing today's active workout, rebuild the session
     if (dateStr === todayStr) {
-      const newWorkout = resolveWorkout(dateStr, settings.programStartDate, { _v: 2, [dateStr]: newWorkoutId })
+      const newWorkout = resolveWorkout(dateStr, settings.programStartDate, { _v: 2, [dateStr]: newWorkoutId }, exerciseSwaps)
       if (newWorkout) {
         const sections = newWorkout.sections.map(section => ({
           sectionId: section.id,
-          exercises: section.exercises.map(ex => ({
-            id: ex.id,
-            name: ex.name,
-            sets: buildInitialSets(ex, getLastWeightForExercise(ex.id)),
-          })),
+          exercises: section.exercises.map(ex => sessionExercise(ex, getLastWeightForExercise(ex.id))),
         }))
-        setActiveSession({ date: todayStr, workoutId: newWorkoutId, workoutName: newWorkout.name, sections, abCompleted: [] })
+        setActiveSession({ date: todayStr, workoutId: newWorkoutId, workoutName: newWorkout.name, sections, abCompleted: [], abSwaps: {} })
         setActiveWorkoutTemplate(newWorkout)
       }
     }
     setShowChangePicker(false)
     setChangePickerDate(null)
+  }
+
+  function slotTemplate(programId) {
+    for (const section of activeWorkoutTemplate?.sections || []) {
+      const exercise = section.exercises.find(ex => (ex.programId || ex.id) === programId)
+      if (exercise) return exercise
+    }
+    return null
+  }
+
+  function openLiftSwap(sectionId, exercise) {
+    const programId = exercise.programId || exercise.id
+    const group = groupForExercise(programId)
+    if (!group) return
+    setSwapRequest({
+      kind: 'lift',
+      sectionId,
+      programId,
+      group,
+      currentId: exercise.id,
+      planned: getCatalogExercise(programId),
+    })
+  }
+
+  function openAbSwap(exercise) {
+    const programId = exercise.programId || exercise.id
+    const group = groupForExercise(programId) || 'abs'
+    setSwapRequest({
+      kind: 'ab',
+      programId,
+      group,
+      currentId: exercise.id,
+      planned: getCatalogExercise(programId),
+    })
+  }
+
+  function applyLiftToSession(programId, sectionId, exercise) {
+    const template = slotTemplate(programId)
+    const prescription = template || { sets: exercise.sets, reps: exercise.reps }
+    setActiveSession(prev => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        sections: prev.sections.map(section => {
+          if (section.sectionId !== sectionId) return section
+          return {
+            ...section,
+            exercises: section.exercises.map(slot => {
+              if ((slot.programId || slot.id) !== programId) return slot
+              return sessionExercise(
+                {
+                  ...prescription,
+                  programId,
+                  id: exercise.id,
+                  name: exercise.name,
+                  muscle: exercise.muscle,
+                  defaultWeight: exercise.defaultWeight,
+                },
+                getLastWeightForExercise(exercise.id)
+              )
+            }),
+          }
+        }),
+      }
+    })
+  }
+
+  function applyAbToSession(programId, exercise) {
+    setActiveSession(prev => {
+      if (!prev) return prev
+      const previous = prev.abSwaps?.[programId]
+      const templateId = activeWorkoutTemplate?.abCircuit?.exercises?.find(ex => (ex.programId || ex.id) === programId)?.id
+      const drop = new Set([programId, previous?.id, templateId].filter(Boolean))
+      return {
+        ...prev,
+        abCompleted: (prev.abCompleted || []).filter(id => !drop.has(id)),
+        abSwaps: {
+          ...(prev.abSwaps || {}),
+          [programId]: { id: exercise.id, name: exercise.name, muscle: exercise.muscle },
+        },
+      }
+    })
+  }
+
+  function handleSwapConfirm(target, makeDefault) {
+    if (!swapRequest) return
+    const { programId, kind, sectionId } = swapRequest
+    const planned = getCatalogExercise(programId)
+    const next = target.restore
+      ? { ...planned, id: programId, name: planned?.name, muscle: planned?.muscle, defaultWeight: planned?.defaultWeight, restore: true }
+      : target
+
+    if (next.custom) rememberCustomExercise(next)
+    if (target.restore) {
+      if (makeDefault) clearExerciseSwap(programId)
+    } else if (makeDefault) {
+      const record = swapRecord(next)
+      if (record) saveExerciseSwap(programId, record)
+    }
+
+    if (kind === 'ab') applyAbToSession(programId, next)
+    else applyLiftToSession(programId, sectionId, next)
+    setSwapRequest(null)
   }
 
   function finishWorkout() {
@@ -213,6 +330,52 @@ export default function TodayPage() {
     setActiveSession(null)
     setShowComplete(true)
   }
+
+  const displayAbCircuit = useMemo(() => {
+    const circuit = activeWorkoutTemplate?.abCircuit
+    if (!circuit) return null
+    const overrides = activeSession?.abSwaps || {}
+    return {
+      ...circuit,
+      exercises: circuit.exercises.map(ex => {
+        const programId = ex.programId || ex.id
+        const override = overrides[programId]
+        if (!override) return { ...ex, programId }
+        return {
+          ...ex,
+          programId,
+          id: override.id,
+          name: override.name,
+          muscle: override.muscle || ex.muscle,
+          notes: override.id === programId ? ex.notes : undefined,
+          swapped: override.id !== programId,
+        }
+      }),
+    }
+  }, [activeWorkoutTemplate, activeSession])
+
+  const swapChoices = useMemo(() => {
+    if (!swapRequest) return { builtIn: [], custom: [] }
+    const saved = customExercises && typeof customExercises === 'object' && !Array.isArray(customExercises)
+      ? Object.values(customExercises)
+      : []
+    const builtIn = alternativesFor(swapRequest.group)
+      .filter(exercise => exercise.id !== swapRequest.currentId)
+      .map(exercise => ({ ...exercise, lastWeight: getLastWeightForExercise(exercise.id) }))
+    const custom = saved
+      .filter(exercise => exercise?.group === swapRequest.group && exercise.id !== swapRequest.currentId)
+      .filter(exercise => !builtIn.some(item => item.id === exercise.id))
+      .map(exercise => ({
+        id: exercise.id,
+        name: exercise.name,
+        group: exercise.group,
+        custom: true,
+        muscle: groupLabel(exercise.group) || 'Custom',
+        defaultWeight: 0,
+        lastWeight: getLastWeightForExercise(exercise.id),
+      }))
+    return { builtIn, custom }
+  }, [swapRequest, customExercises, getLastWeightForExercise])
 
   const completedSetCount = activeSession
     ? activeSession.sections.flatMap(s => s.exercises.flatMap(e => e.sets)).filter(s => s.completed).length : 0
@@ -383,16 +546,28 @@ export default function TodayPage() {
                     )}
                     <div className="space-y-3">
                       {sectionTemplate.exercises.map(exTemplate => {
-                        const sessionEx = sessionSection.exercises.find(e => e.id === exTemplate.id)
+                        const slotId = exTemplate.programId || exTemplate.id
+                        const sessionEx = sessionSection.exercises.find(e => (e.programId || e.id) === slotId)
                         if (!sessionEx) return null
+                        const exercise = {
+                          ...exTemplate,
+                          id: sessionEx.id,
+                          name: sessionEx.name,
+                          muscle: sessionEx.muscle || exTemplate.muscle,
+                          defaultWeight: sessionEx.defaultWeight ?? exTemplate.defaultWeight,
+                          programId: slotId,
+                          swapped: sessionEx.id !== slotId,
+                          notes: sessionEx.id === slotId ? exTemplate.notes : null,
+                        }
                         return (
                           <ExerciseCard
-                            key={exTemplate.id}
-                            exercise={exTemplate}
+                            key={slotId}
+                            exercise={exercise}
                             sets={sessionEx.sets}
-                            onSetsChange={(sets) => updateExerciseSets(sectionTemplate.id, exTemplate.id, sets)}
-                            lastWeight={getLastWeightForExercise(exTemplate.id)}
-                            lastWeekWeight={currentWeek > 1 ? getWeightForExerciseInWeek(exTemplate.id, currentWeek - 1) : null}
+                            onSetsChange={(sets) => updateExerciseSets(sectionTemplate.id, slotId, sets)}
+                            lastWeight={getLastWeightForExercise(exercise.id)}
+                            lastWeekWeight={currentWeek > 1 ? getWeightForExerciseInWeek(exercise.id, currentWeek - 1) : null}
+                            onSwap={() => openLiftSwap(sectionTemplate.id, exercise)}
                           />
                         )
                       })}
@@ -412,9 +587,10 @@ export default function TodayPage() {
               <p className="text-xs font-mono text-muted text-center mb-3">5 MIN — ALWAYS DO THIS</p>
               <div className="mb-6">
                 <AbCircuitSection
-                  circuit={activeWorkoutTemplate.abCircuit}
+                  circuit={displayAbCircuit}
                   completed={activeSession.abCompleted}
                   onToggle={toggleAb}
+                  onSwap={openAbSwap}
                 />
               </div>
 
@@ -439,6 +615,18 @@ export default function TodayPage() {
           scheduleOverrides={scheduleOverrides}
           onSelect={handleChangeWorkout}
           onClose={() => { setShowChangePicker(false); setChangePickerDate(null) }}
+        />
+      )}
+
+      {swapRequest && (
+        <SwapExerciseSheet
+          group={swapRequest.group}
+          groupLabel={groupLabel(swapRequest.group) || 'Exercise'}
+          planned={swapRequest.planned}
+          currentId={swapRequest.currentId}
+          choices={swapChoices}
+          onConfirm={handleSwapConfirm}
+          onClose={() => setSwapRequest(null)}
         />
       )}
 

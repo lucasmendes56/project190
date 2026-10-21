@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-export default function AbCircuitSection({ circuit, completed, onToggle }) {
+export default function AbCircuitSection({ circuit, completed, onToggle, onSwap }) {
   const [expanded, setExpanded] = useState(false)
 
   if (!circuit) return null
@@ -43,30 +43,45 @@ export default function AbCircuitSection({ circuit, completed, onToggle }) {
             {circuit.exercises.map(ex => {
               const done = completed.includes(ex.id)
               return (
-                <button
-                  key={ex.id}
-                  onClick={() => onToggle(ex.id)}
-                  className="w-full flex items-center gap-3 py-2.5 text-left transition-opacity active:opacity-60"
+                <div
+                  key={ex.programId || ex.id}
+                  className="flex items-center gap-2 py-2.5"
                   style={{ borderBottom: '1px solid #111' }}
                 >
-                  <div
-                    className="w-5 h-5 flex-shrink-0 flex items-center justify-center border"
-                    style={{
-                      borderColor: done ? '#DC2626' : '#333',
-                      background: done ? '#DC2626' : 'transparent',
-                    }}
+                  <button
+                    type="button"
+                    onClick={() => onToggle(ex.id)}
+                    className="flex-1 min-w-0 flex items-center gap-3 text-left transition-opacity active:opacity-60"
                   >
-                    {done && (
-                      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-xs font-mono font-bold uppercase tracking-wide ${done ? 'text-primary' : 'text-white'}`}>{ex.name}</p>
-                    <p className="text-[10px] font-mono text-muted">{ex.reps} · {ex.notes}</p>
-                  </div>
-                </button>
+                    <div
+                      className="w-5 h-5 flex-shrink-0 flex items-center justify-center border"
+                      style={{
+                        borderColor: done ? '#DC2626' : '#333',
+                        background: done ? '#DC2626' : 'transparent',
+                      }}
+                    >
+                      {done && (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs font-mono font-bold uppercase tracking-wide ${done ? 'text-primary' : 'text-white'}`}>{ex.name}</p>
+                      <p className="text-[10px] font-mono text-muted">{ex.reps}{ex.notes ? ` · ${ex.notes}` : ''}</p>
+                    </div>
+                  </button>
+                  {onSwap && (
+                    <button
+                      type="button"
+                      onClick={() => onSwap(ex)}
+                      className="flex-shrink-0 text-[10px] font-mono font-bold tracking-widest uppercase active:opacity-60"
+                      style={{ color: '#DC2626' }}
+                    >
+                      Swap exercise
+                    </button>
+                  )}
+                </div>
               )
             })}
           </div>

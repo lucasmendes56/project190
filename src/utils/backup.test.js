@@ -108,6 +108,13 @@ test('backup then restore round-trips stored data exactly', () => {
     [LAST_BACKUP_STORAGE_KEY]: JSON.stringify('2020-01-01T00:00:00.000Z'),
     unrelated: 'leave-me',
     wt_custom: JSON.stringify({ kept: true, n: 1 }),
+    wt_exercise_swaps: JSON.stringify({
+      bench_press: { id: 'db_bench_press' },
+      squat: { id: 'custom_front_squat', name: 'Front squat', custom: true, group: 'quads' },
+    }),
+    wt_custom_exercises: JSON.stringify({
+      custom_front_squat: { id: 'custom_front_squat', name: 'Front squat', group: 'quads' },
+    }),
   })
   const original = {
     wt_settings: storage.getItem('wt_settings'),
@@ -115,6 +122,8 @@ test('backup then restore round-trips stored data exactly', () => {
     wt_bodyweight: storage.getItem('wt_bodyweight'),
     wt_schedule: storage.getItem('wt_schedule'),
     wt_custom: storage.getItem('wt_custom'),
+    wt_exercise_swaps: storage.getItem('wt_exercise_swaps'),
+    wt_custom_exercises: storage.getItem('wt_custom_exercises'),
   }
 
   const payload = createBackupPayload(storage, exportedAt)
@@ -143,6 +152,8 @@ test('backup then restore round-trips stored data exactly', () => {
   assert.equal(storage.getItem('wt_bodyweight'), original.wt_bodyweight)
   assert.equal(storage.getItem('wt_schedule'), original.wt_schedule)
   assert.equal(storage.getItem('wt_custom'), original.wt_custom)
+  assert.equal(storage.getItem('wt_exercise_swaps'), original.wt_exercise_swaps)
+  assert.equal(storage.getItem('wt_custom_exercises'), original.wt_custom_exercises)
   assert.equal(storage.getItem('wt_extra'), null)
   assert.equal(storage.getItem('unrelated'), 'still-here')
   assert.equal(storage.getItem(LAST_BACKUP_STORAGE_KEY), JSON.stringify(exportedAt))

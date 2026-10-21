@@ -24,6 +24,8 @@ const KNOWN_SHAPES = {
   wt_log: Array.isArray,
   wt_bodyweight: Array.isArray,
   wt_schedule: isPlainObject,
+  wt_exercise_swaps: isPlainObject,
+  wt_custom_exercises: isPlainObject,
 }
 
 function isPlainObject(value) {
