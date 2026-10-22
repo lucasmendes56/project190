@@ -24,16 +24,42 @@ export function AppProvider({ children }) {
   //   'wt_bodyweight'  — ⚠️ SACRED: all bodyweight entries. Only cleared by explicit user action below.
   //   'wt_schedule'    — explicit weekly assignments (v2 flat map). Reset on full data wipe.
   //                      Migration from v1 (DOW overrides) runs automatically in useSchedule.
+  //   'wt_last_backup' — when the last backup file was saved. Not workout data.
+  //   'wt_exercise_swaps' — usual replacements for a program exercise. Missing key = original plan.
+  //   'wt_custom_exercises' — names typed in Swap exercise, so they can be picked again.
   //
   // If the data schema for wt_log or wt_bodyweight needs to change, write a forward-only migration
   // that preserves all existing records and adds new fields with safe defaults. Never destructively
   // overwrite or reinitialize these keys during startup, hot-reload, or any config change.
   const [settings, setSettings, clearSettings] = useLocalStorage('wt_settings', DEFAULT_SETTINGS)
+  const [exerciseSwaps, setExerciseSwaps, clearExerciseSwaps] = useLocalStorage('wt_exercise_swaps', {})
+  const [customExercises, setCustomExercises, clearCustomExercises] = useLocalStorage('wt_custom_exercises', {})
   const workoutLog = useWorkoutLog()
   const bodyWeight = useBodyWeight()
   const { scheduleOverrides, swapWorkouts, assignWorkout, unassignWorkout, initializeSchedule } = useSchedule(settings.programStartDate)
   const { streak, longestStreak } = useStreak(workoutLog.log, settings.programStartDate, scheduleOverrides)
-  const program = useProgram(settings.programStartDate, scheduleOverrides)
+  const program = useProgram(settings.programStartDate, scheduleOverrides, exerciseSwaps)
+
+  const saveExerciseSwap = useCallback((programId, record) => {
+    setExerciseSwaps(prev => ({ ...(prev && typeof prev === 'object' && !Array.isArray(prev) ? prev : {}), [programId]: record }))
+  }, [setExerciseSwaps])
+
+  const clearExerciseSwap = useCallback((programId) => {
+    setExerciseSwaps(prev => {
+      const source = prev && typeof prev === 'object' && !Array.isArray(prev) ? prev : {}
+      if (!Object.prototype.hasOwnProperty.call(source, programId)) return source
+      const next = { ...source }
+      delete next[programId]
+      return next
+    })
+  }, [setExerciseSwaps])
+
+  const rememberCustomExercise = useCallback((exercise) => {
+    setCustomExercises(prev => ({
+      ...(prev && typeof prev === 'object' && !Array.isArray(prev) ? prev : {}),
+      [exercise.id]: { id: exercise.id, name: exercise.name, group: exercise.group },
+    }))
+  }, [setCustomExercises])
 
   // Active session: in-memory until workout is finished
   const [activeSession, setActiveSession] = useState(null)
@@ -56,8 +82,10 @@ export function AppProvider({ children }) {
     workoutLog.clearLog()
     bodyWeight.clearWeights()
     localStorage.removeItem('wt_schedule')
+    clearExerciseSwaps()
+    clearCustomExercises()
     setActiveSession(null)
-  }, [clearSettings, workoutLog, bodyWeight])
+  }, [clearSettings, workoutLog, bodyWeight, clearExerciseSwaps, clearCustomExercises])
 
   const isOnboarded = !!settings.programStartDate
 
@@ -83,6 +111,11 @@ export function AppProvider({ children }) {
       unassignWorkout,
       initializeSchedule,
       regenerateSchedule,
+      exerciseSwaps,
+      customExercises,
+      saveExerciseSwap,
+      clearExerciseSwap,
+      rememberCustomExercise,
       // Active session
       activeSession,
       setActiveSession,

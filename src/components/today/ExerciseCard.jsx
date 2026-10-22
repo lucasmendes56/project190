@@ -1,6 +1,6 @@
 import SetRow from './SetRow'
 
-export default function ExerciseCard({ exercise, sets, onSetsChange, lastWeight, lastWeekWeight }) {
+export default function ExerciseCard({ exercise, sets, onSetsChange, lastWeight, lastWeekWeight, onSwap }) {
   const completedCount = sets.filter(s => s.completed).length
   const allDone = completedCount === sets.length && sets.length > 0
 
@@ -22,6 +22,9 @@ export default function ExerciseCard({ exercise, sets, onSetsChange, lastWeight,
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="font-mono font-bold text-white text-sm uppercase tracking-wide">{exercise.name}</p>
+            {exercise.swapped && (
+              <span className="text-[9px] font-mono tracking-widest border px-1.5 py-0.5" style={{ color: '#9e9e9e', borderColor: '#1a1a1a' }}>SWAPPED</span>
+            )}
             {exercise.superset && (
               <span className="text-[9px] font-mono tracking-widest border px-1.5 py-0.5" style={{ color: '#555', borderColor: '#1a1a1a' }}>SUPERSET</span>
             )}
@@ -31,6 +34,16 @@ export default function ExerciseCard({ exercise, sets, onSetsChange, lastWeight,
             <span className="text-muted/30">·</span>
             <p className="text-xs font-mono text-primary font-bold">{exercise.sets} × {exercise.reps}</p>
           </div>
+          {onSwap && (
+            <button
+              type="button"
+              onClick={onSwap}
+              className="mt-2 text-[10px] font-mono font-bold tracking-widest uppercase active:opacity-60"
+              style={{ color: '#DC2626' }}
+            >
+              Swap exercise
+            </button>
+          )}
         </div>
         <span className={`text-xs font-mono font-bold ml-2 flex-shrink-0 ${allDone ? 'text-primary' : 'text-muted'}`}>
           {completedCount}/{sets.length}

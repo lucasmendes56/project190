@@ -4,6 +4,7 @@ import PageWrapper from '../components/layout/PageWrapper'
 import { today } from '../utils/dateUtils'
 import { DEFAULT_WEEK_PATTERN } from '../utils/programUtils'
 import WeekPatternEditor from '../components/shared/WeekPatternEditor'
+import BackupSection from '../components/settings/BackupSection'
 
 const inputClass = 'w-full border px-4 py-3 text-white text-sm font-mono focus:outline-none'
 const inputStyle = { background: '#000', borderColor: '#1a1a1a', caretColor: '#DC2626' }
@@ -150,6 +151,8 @@ export default function SettingsPage() {
           ))}
         </div>
       </div>
+
+      <BackupSection />
 
       {/* Danger zone */}
       <div className="mt-4 border p-4" style={{ borderColor: '#3a0000', background: '#0d0d0d' }}>

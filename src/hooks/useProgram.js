@@ -2,13 +2,13 @@ import { useMemo } from 'react'
 import { resolveWorkout, isScheduledWorkoutDay, nextWorkoutDate, getPhase } from '../utils/programUtils'
 import { today, programWeek } from '../utils/dateUtils'
 
-export function useProgram(programStartDate, scheduleOverrides = {}) {
+export function useProgram(programStartDate, scheduleOverrides = {}, exerciseSwaps = {}) {
   const todayStr = today()
 
   const todayWorkout = useMemo(() => {
     if (!programStartDate) return null
-    return resolveWorkout(todayStr, programStartDate, scheduleOverrides)
-  }, [programStartDate, todayStr, scheduleOverrides])
+    return resolveWorkout(todayStr, programStartDate, scheduleOverrides, exerciseSwaps)
+  }, [programStartDate, todayStr, scheduleOverrides, exerciseSwaps])
 
   const currentWeek = useMemo(() => {
     if (!programStartDate) return null
@@ -22,7 +22,9 @@ export function useProgram(programStartDate, scheduleOverrides = {}) {
 
   const isProgramComplete = currentWeek !== null && currentWeek > 12
 
-  const isTodayWorkoutDay = isScheduledWorkoutDay(todayStr, programStartDate, scheduleOverrides)
+  const isTodayWorkoutDay = programStartDate
+    ? isScheduledWorkoutDay(todayStr, programStartDate, scheduleOverrides)
+    : false
 
   const nextWorkout = useMemo(() => {
     if (!programStartDate) return null
@@ -30,13 +32,13 @@ export function useProgram(programStartDate, scheduleOverrides = {}) {
     if (!nextDate) return null
     return {
       date: nextDate,
-      workout: resolveWorkout(nextDate, programStartDate, scheduleOverrides),
+      workout: resolveWorkout(nextDate, programStartDate, scheduleOverrides, exerciseSwaps),
     }
-  }, [programStartDate, todayStr, scheduleOverrides])
+  }, [programStartDate, todayStr, scheduleOverrides, exerciseSwaps])
 
   const getWorkoutForDate = (dateStr) => {
     if (!programStartDate) return null
-    return resolveWorkout(dateStr, programStartDate, scheduleOverrides)
+    return resolveWorkout(dateStr, programStartDate, scheduleOverrides, exerciseSwaps)
   }
 
   return {

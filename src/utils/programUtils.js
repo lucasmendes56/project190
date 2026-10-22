@@ -1,6 +1,7 @@
 import { PHASES, PHASE_SCHEDULES } from '../data/program'
 import { EXERCISES } from '../data/exercises'
 import { AB_CIRCUITS } from '../data/abCircuit'
+import { applyExerciseSwaps } from '../data/exerciseSwaps'
 import { dayOfWeek, programWeek, addDays } from './dateUtils'
 
 // Returns the phase object for a given week number
@@ -87,7 +88,7 @@ export function getEffectiveWorkoutId(dateStr, startDateStr, schedule = {}) {
 }
 
 // Core resolver: date + start date + schedule → full hydrated workout template, or null for rest day
-export function resolveWorkout(dateStr, startDateStr, schedule = {}) {
+export function resolveWorkout(dateStr, startDateStr, schedule = {}, swaps = null) {
   const weekNum = programWeek(startDateStr, dateStr)
   const phase = getPhase(weekNum)
   if (!phase) return null
@@ -100,21 +101,33 @@ export function resolveWorkout(dateStr, startDateStr, schedule = {}) {
   const dayTemplate = Object.values(phaseSchedule).find(t => t?.id === workoutId)
   if (!dayTemplate) return null
 
+  const circuit = dayTemplate.abCircuit ? AB_CIRCUITS[dayTemplate.abCircuit] : null
   const sections = dayTemplate.sections.map(section => ({
     ...section,
     exercises: section.exercises.map(ex => ({
       ...EXERCISES[ex.id],
       ...ex,
+      programId: ex.id,
     })),
   }))
 
-  return {
+  const workout = {
     ...dayTemplate,
     sections,
-    abCircuit: AB_CIRCUITS[dayTemplate.abCircuit],
+    abCircuit: circuit
+      ? {
+          ...circuit,
+          exercises: circuit.exercises.map(ex => ({ ...ex, programId: ex.id })),
+        }
+      : null,
     phase,
     weekNum,
   }
+
+  if (!swaps || typeof swaps !== 'object' || Array.isArray(swaps) || Object.keys(swaps).length === 0) {
+    return workout
+  }
+  return applyExerciseSwaps(workout, swaps)
 }
 
 // Is this date a scheduled workout day?

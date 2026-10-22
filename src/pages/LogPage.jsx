@@ -58,8 +58,8 @@ function LogEntry({ entry }) {
       </summary>
 
       <div className="pb-4 space-y-3" style={{ borderTop: '1px solid #1a1a1a', paddingTop: '12px' }}>
-        {entry.exercises?.map(ex => (
-          <div key={ex.id}>
+        {entry.exercises?.map((ex, i) => (
+          <div key={ex.programId || `${ex.id}-${i}`}>
             <p className="text-xs font-mono font-bold text-white uppercase tracking-wide mb-1">{ex.name}</p>
             <div className="space-y-0.5">
               {ex.sets.map((set, i) => (
