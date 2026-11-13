@@ -52,6 +52,10 @@ export function formatDayName(dateStr) {
   return d.toLocaleDateString('en-US', { weekday: 'long' })
 }
 
+export function friendlyDate(dateStr) {
+  return `${formatDayName(dateStr)}, ${formatDate(dateStr)}`
+}
+
 // Returns array of YYYY-MM-DD strings for a full 12-week program starting from startDate
 export function programDates(startDateStr) {
   return Array.from({ length: 84 }, (_, i) => addDays(startDateStr, i))
@@ -77,4 +81,22 @@ export function isPast(dateStr) {
 
 export function isFuture(dateStr) {
   return dateStr > today()
+}
+
+// Day navigator shows 7 days centered on today + offset*7.
+// Returns an offset <= 0 whose window contains dateStr.
+export function weekOffsetContaining(dateStr, todayStr = today()) {
+  const diff = daysBetween(todayStr, dateStr)
+  const contains = (offset) => diff >= offset * 7 - 3 && diff <= offset * 7 + 3
+  let offset = Math.round(diff / 7)
+  if (!contains(offset)) {
+    offset = Math.ceil((diff - 3) / 7)
+  }
+  if (offset > 0) offset = 0
+  let guard = 0
+  while (!contains(offset) && guard < 60) {
+    offset -= 1
+    guard += 1
+  }
+  return Math.min(0, offset)
 }

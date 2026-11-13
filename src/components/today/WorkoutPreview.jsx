@@ -1,6 +1,6 @@
 // Read-only workout view — used when browsing days other than today
 
-export default function WorkoutPreview({ workout, completed, onDoToday }) {
+export default function WorkoutPreview({ workout, completed, onDoToday, onLogDay }) {
   if (!workout) {
     return (
       <div className="text-center py-12">
@@ -96,12 +96,26 @@ export default function WorkoutPreview({ workout, completed, onDoToday }) {
         </div>
       )}
 
+      {!completed && onLogDay && (
+        <button
+          type="button"
+          onClick={() => onLogDay(workout)}
+          className="w-full mt-2 border border-primary text-primary font-mono font-bold text-sm py-4 tracking-widest uppercase active:opacity-70 transition-opacity"
+        >
+          LOG THIS DAY
+        </button>
+      )}
+
       {!completed && onDoToday && (
         <button
+          type="button"
           onClick={() => onDoToday(workout)}
-          className="w-full mt-2 mb-6 border border-primary text-primary font-mono font-bold text-sm py-4 tracking-widest uppercase active:opacity-70 transition-opacity"
+          className={onLogDay
+            ? 'w-full text-[10px] font-mono font-bold tracking-widest uppercase py-3 mb-6 active:opacity-60'
+            : 'w-full mt-2 mb-6 border border-primary text-primary font-mono font-bold text-sm py-4 tracking-widest uppercase active:opacity-70 transition-opacity'}
+          style={onLogDay ? { color: '#333' } : undefined}
         >
-          DO THIS WORKOUT TODAY
+          {onLogDay ? 'DO THIS WORKOUT TODAY INSTEAD' : 'DO THIS WORKOUT TODAY'}
         </button>
       )}
     </div>

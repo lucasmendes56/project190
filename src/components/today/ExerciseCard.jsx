@@ -64,7 +64,7 @@ export default function ExerciseCard({ exercise, sets, onSetsChange, lastWeight,
         )}
         {sets.map((set, idx) => (
           <SetRow
-            key={idx}
+            key={`${exercise.id}-${idx}`}
             setNum={idx + 1}
             set={set}
             onChange={(updated) => updateSet(idx, updated)}

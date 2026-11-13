@@ -3,6 +3,7 @@ import { EXERCISES } from '../data/exercises'
 import { AB_CIRCUITS } from '../data/abCircuit'
 import { applyExerciseSwaps } from '../data/exerciseSwaps'
 import { dayOfWeek, programWeek, addDays } from './dateUtils'
+export { parseMinReps } from './reps.js'
 
 // Returns the phase object for a given week number
 export function getPhase(weekNum) {
@@ -158,14 +159,6 @@ export function nextWorkoutDate(fromDateStr, startDateStr = null, schedule = {})
     if (isScheduledWorkoutDay(check, startDateStr, schedule)) return check
   }
   return null
-}
-
-// Parse the minimum reps from a display string like '8–10' or '12' or '10+10+10'
-export function parseMinReps(repsStr) {
-  if (!repsStr) return 10
-  const str = String(repsStr)
-  const match = str.match(/\d+/)
-  return match ? parseInt(match[0]) : 10
 }
 
 // ─────────────────────────────────────────────────────────────────
