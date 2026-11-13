@@ -1,4 +1,4 @@
-export default function WorkoutCompleteModal({ streak, workoutName, onClose }) {
+export default function WorkoutCompleteModal({ streak, workoutName, onClose, updated = false, dateLabel = '' }) {
   const message = streak >= 10
     ? 'CONSISTENCY IS YOUR SUPERPOWER.'
     : streak >= 5
@@ -8,20 +8,24 @@ export default function WorkoutCompleteModal({ streak, workoutName, onClose }) {
     : 'EVERY REP COUNTS. EAT PROTEIN. RECOVER.'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.9)' }} onClick={onClose}>
+    <div className="fixed inset-0 z-[80] flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.9)' }} onClick={onClose}>
       <div
         className="w-full max-w-lg border-t border-l border-r animate-slide-up p-8 pb-12"
-        style={{ background: '#000', borderColor: '#DC2626' }}
+        style={{ background: '#000', borderColor: '#DC2626', marginBottom: '56px' }}
         onClick={e => e.stopPropagation()}
       >
-        <p className="text-[10px] font-mono tracking-[0.5em] text-primary text-center mb-6">SESSION COMPLETE</p>
+        <p className="text-[10px] font-mono tracking-[0.5em] text-primary text-center mb-6">
+          {updated ? 'WORKOUT UPDATED' : 'SESSION COMPLETE'}
+        </p>
 
         <h2 className="text-2xl font-mono font-black text-white text-center uppercase tracking-wide mb-1">
           {workoutName}
         </h2>
-        <p className="text-xs font-mono text-muted text-center mb-8 tracking-widest">CRUSHED</p>
+        <p className="text-xs font-mono text-muted text-center mb-8 tracking-widest">
+          {updated ? (dateLabel || 'SAVED') : 'CRUSHED'}
+        </p>
 
-        {streak > 0 && (
+        {!updated && streak > 0 && (
           <div className="border border-primary/30 p-4 mb-6 text-center">
             <p className="text-4xl font-mono font-black text-primary">{streak}</p>
             <p className="text-[10px] font-mono tracking-[0.4em] text-primary/60 mt-1">WORKOUT STREAK</p>
@@ -29,7 +33,7 @@ export default function WorkoutCompleteModal({ streak, workoutName, onClose }) {
         )}
 
         <p className="text-center text-xs font-mono tracking-widest mb-8" style={{ color: '#444' }}>
-          {message}
+          {updated ? 'THE SAVED WORKOUT FOR THIS DAY WAS REPLACED.' : message}
         </p>
 
         <button

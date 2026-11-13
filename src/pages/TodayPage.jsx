@@ -1,17 +1,17 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useApp } from '../context/AppContext'
 import PageWrapper from '../components/layout/PageWrapper'
 import StreakBadge from '../components/streak/StreakBadge'
 import PhaseTag from '../components/shared/PhaseTag'
-import ExerciseCard from '../components/today/ExerciseCard'
-import AbCircuitSection from '../components/today/AbCircuitSection'
 import SwapExerciseSheet from '../components/today/SwapExerciseSheet'
 import WeekStrip from '../components/today/WeekStrip'
 import DayNav from '../components/today/DayNav'
 import WorkoutPreview from '../components/today/WorkoutPreview'
+import WorkoutLogger from '../components/today/WorkoutLogger'
+import LoggedWorkoutReview from '../components/today/LoggedWorkoutReview'
 import WorkoutCompleteModal from '../components/complete/WorkoutCompleteModal'
-import { formatDate, formatDayName, today, addDays } from '../utils/dateUtils'
-import { parseMinReps, resolveWorkout, getWorkoutSlots } from '../utils/programUtils'
+import { friendlyDate, formatDate, formatDayName, today, addDays, weekOffsetContaining, programWeek } from '../utils/dateUtils'
+import { resolveWorkout, getWorkoutSlots, getPhase } from '../utils/programUtils'
 import { REST_DAY_MESSAGES } from '../data/program'
 import {
   alternativesFor,
@@ -20,25 +20,20 @@ import {
   groupLabel,
   swapRecord,
 } from '../data/exerciseSwaps'
-
-function buildInitialSets(exercise, lastWeight) {
-  return Array.from({ length: exercise.sets }, () => ({
-    weight: lastWeight ?? exercise.defaultWeight ?? 0,
-    reps: parseMinReps(exercise.reps),
-    completed: false,
-  }))
-}
-
-function sessionExercise(ex, lastWeight) {
-  return {
-    programId: ex.programId || ex.id,
-    id: ex.id,
-    name: ex.name,
-    muscle: ex.muscle,
-    defaultWeight: ex.defaultWeight,
-    sets: buildInitialSets(ex, lastWeight),
-  }
-}
+import {
+  applySetUpdate,
+  buildSession,
+  confirmDraft,
+  draftForEditing,
+  entryFromSession,
+  finishPlan,
+  markDirty,
+  normalizeDrafts,
+  parkedPastDraft,
+  sessionExercise,
+  sessionFromEntry,
+  templateFromSession,
+} from '../utils/workoutSession'
 
 export default function TodayPage() {
   const {
@@ -48,15 +43,18 @@ export default function TodayPage() {
     currentWeek,
     currentPhase,
     addEntry,
+    replaceEntryForDate,
     isCompletedDate,
     getLastWeightForExercise,
     getWeightForExerciseInWeek,
-    getTodayEntry,
+    getEntriesForDate,
     getEntryForDate,
-    log,
     isProgramComplete,
-    activeSession,
-    setActiveSession,
+    drafts,
+    getDrafts,
+    putDraft,
+    mutateDraft,
+    clearDraft,
     settings,
     scheduleOverrides,
     swapWorkouts,
@@ -69,38 +67,47 @@ export default function TodayPage() {
   } = useApp()
 
   const todayStr = today()
-  const [selectedDate, setSelectedDate] = useState(todayStr)
+  const [pickedDate, setPickedDate] = useState(todayStr)
   /** 0 = DayNav centered on today; -1 = one week earlier, etc. */
   const [dayNavWeekOffset, setDayNavWeekOffset] = useState(0)
   const dayNavCenterDate = useMemo(() => addDays(todayStr, dayNavWeekOffset * 7), [todayStr, dayNavWeekOffset])
+  const visibleDays = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => addDays(dayNavCenterDate, i - 3)),
+    [dayNavCenterDate],
+  )
+  const selectedDate = visibleDays.includes(pickedDate) ? pickedDate : dayNavCenterDate
 
   const handleDayNavWeekShift = useCallback((delta) => {
     setDayNavWeekOffset(prev => Math.min(0, prev + delta))
   }, [])
 
-  // Keep selected day on-screen when changing week strip
-  useEffect(() => {
-    const days = Array.from({ length: 7 }, (_, i) => addDays(dayNavCenterDate, i - 3))
-    setSelectedDate(sel => (days.includes(sel) ? sel : dayNavCenterDate))
-  }, [dayNavCenterDate])
   const [showComplete, setShowComplete] = useState(false)
   const [completedWorkoutName, setCompletedWorkoutName] = useState(null)
-  const [activeWorkoutTemplate, setActiveWorkoutTemplate] = useState(null)
+  const [completedDateLabel, setCompletedDateLabel] = useState('')
+  const [completedAsUpdate, setCompletedAsUpdate] = useState(false)
   const [showChangePicker, setShowChangePicker] = useState(false)
   const [changePickerDate, setChangePickerDate] = useState(null)
   const [swapRequest, setSwapRequest] = useState(null)
+  const [flashDate, setFlashDate] = useState(null)
+  const [warning, setWarning] = useState(null)
+  const flashTimer = useRef(null)
+
+  const [resumedOnOpen] = useState(() => new Set(
+    Object.values(normalizeDrafts(drafts))
+      .filter(draft => draft.dirty || draft.confirmedAt || draft.updatingEntryId)
+      .map(draft => draft.date)
+  ))
 
   const alreadyDone = isCompletedDate(todayStr)
-  const todayEntry = getTodayEntry()
   const isViewingToday = selectedDate === todayStr
+  const selectedEntries = getEntriesForDate(selectedDate)
+  const todayEntries = getEntriesForDate(todayStr)
 
-  // Resolve workout for the selected date (for preview)
   const previewWorkout = useMemo(() => {
     if (!settings.programStartDate) return null
     return resolveWorkout(selectedDate, settings.programStartDate, scheduleOverrides, exerciseSwaps)
   }, [selectedDate, settings.programStartDate, scheduleOverrides, exerciseSwaps])
 
-  // Scheduled workouts for WorkoutPicker (same 7-day window as DayNav)
   const dayNavWorkouts = useMemo(() => {
     if (!settings.programStartDate) return {}
     return Object.fromEntries(
@@ -111,7 +118,6 @@ export default function TodayPage() {
     )
   }, [settings.programStartDate, dayNavCenterDate, scheduleOverrides, exerciseSwaps])
 
-  // DayNav labels: logged workout names for the visible 7 days
   const completedWorkoutLabels = useMemo(() => {
     return Object.fromEntries(
       Array.from({ length: 7 }, (_, i) => {
@@ -120,45 +126,69 @@ export default function TodayPage() {
         return [d, entry?.workoutName ?? null]
       })
     )
-  }, [dayNavCenterDate, log, getEntryForDate])
+  }, [dayNavCenterDate, getEntryForDate])
 
-  const previewCompleted = isCompletedDate(selectedDate)
+  const previewCompleted = selectedEntries.length > 0
 
-  // Build session from today's workout sections
+  const editorSession = draftForEditing(
+    normalizeDrafts(drafts)[selectedDate],
+    selectedEntries,
+    todayStr,
+  )
+
+  const activeTemplate = useMemo(() => {
+    if (!editorSession) return null
+    if (!settings.programStartDate) return templateFromSession(editorSession)
+    const schedule = editorSession.workoutId
+      ? { ...scheduleOverrides, [editorSession.date]: editorSession.workoutId }
+      : scheduleOverrides
+    const resolved = resolveWorkout(editorSession.date, settings.programStartDate, schedule, exerciseSwaps)
+    if (resolved && templateMatchesSession(resolved, editorSession)) return resolved
+    return templateFromSession(editorSession)
+  }, [editorSession, settings.programStartDate, scheduleOverrides, exerciseSwaps])
+
+  // Open today's workout automatically. A day the user already started is left alone.
   useEffect(() => {
-    if (!todayWorkout || alreadyDone || activeSession?.date === todayStr) return
+    if (!todayWorkout || isCompletedDate(todayStr)) return
+    const existing = normalizeDrafts(getDrafts())[todayStr]
+    if (existing && (existing.dirty || existing.confirmedAt || existing.updatingEntryId)) return
+    if (existing && existing.workoutId === todayWorkout.id) return
+    putDraft(buildSession(todayWorkout, todayStr, getLastWeightForExercise))
+  }, [todayWorkout, todayStr, isCompletedDate, getDrafts, putDraft, getLastWeightForExercise])
 
-    const sections = todayWorkout.sections.map(section => ({
-      sectionId: section.id,
-      exercises: section.exercises.map(ex => sessionExercise(ex, getLastWeightForExercise(ex.id))),
-    }))
+  useEffect(() => () => {
+    if (flashTimer.current) window.clearTimeout(flashTimer.current)
+  }, [])
 
-    setActiveSession({ date: todayStr, workoutId: todayWorkout.id, sections, abCompleted: [], abSwaps: {} })
-    setActiveWorkoutTemplate(todayWorkout)
-  }, [todayWorkout?.id, alreadyDone])
+  function focusDate(dateStr) {
+    setDayNavWeekOffset(weekOffsetContaining(dateStr, todayStr))
+    setPickedDate(dateStr)
+  }
 
-  // Restore activeWorkoutTemplate from todayWorkout on page reload if session matches
-  useEffect(() => {
-    if (!activeWorkoutTemplate && activeSession?.date === todayStr && todayWorkout && activeSession.workoutId === todayWorkout.id) {
-      setActiveWorkoutTemplate(todayWorkout)
-    }
-  }, [activeSession, todayWorkout])
+  function resolveFor(dateStr, workoutId) {
+    if (!settings.programStartDate) return null
+    const schedule = workoutId
+      ? { ...scheduleOverrides, [dateStr]: workoutId }
+      : scheduleOverrides
+    return resolveWorkout(dateStr, settings.programStartDate, schedule, exerciseSwaps)
+  }
 
   function updateExerciseSets(sectionId, slotId, sets) {
-    setActiveSession(prev => ({
-      ...prev,
-      sections: prev.sections.map(s =>
-        s.sectionId === sectionId
-          ? { ...s, exercises: s.exercises.map(e => (e.programId || e.id) === slotId ? { ...e, sets } : e) }
-          : s
-      ),
-    }))
+    if (!editorSession) return
+    mutateDraft(editorSession.date, current => applySetUpdate(current, sectionId, slotId, sets))
   }
 
   function toggleAb(id) {
-    setActiveSession(prev => {
-      const has = prev.abCompleted.includes(id)
-      return { ...prev, abCompleted: has ? prev.abCompleted.filter(x => x !== id) : [...prev.abCompleted, id] }
+    if (!editorSession) return
+    mutateDraft(editorSession.date, current => {
+      if (!current) return current
+      const has = (current.abCompleted || []).includes(id)
+      return markDirty({
+        ...current,
+        abCompleted: has
+          ? current.abCompleted.filter(item => item !== id)
+          : [...(current.abCompleted || []), id],
+      })
     })
   }
 
@@ -166,23 +196,23 @@ export default function TodayPage() {
     if (fromDate && fromDate !== todayStr) {
       swapWorkouts(todayStr, fromDate)
     } else if (!fromDate) {
-      // Unscheduled workout selected directly — assign it to today
       assignWorkout(todayStr, borrowedWorkout.id)
     }
-    const sections = borrowedWorkout.sections.map(section => ({
-      sectionId: section.id,
-      exercises: section.exercises.map(ex => sessionExercise(ex, getLastWeightForExercise(ex.id))),
-    }))
-    setActiveSession({
-      date: todayStr,
-      workoutId: borrowedWorkout.id,
-      workoutName: borrowedWorkout.name,
-      sections,
-      abCompleted: [],
-      abSwaps: {},
-    })
-    setActiveWorkoutTemplate(borrowedWorkout)
-    setSelectedDate(todayStr)
+    putDraft(buildSession(borrowedWorkout, todayStr, getLastWeightForExercise))
+    setPickedDate(todayStr)
+    setDayNavWeekOffset(0)
+  }
+
+  function startLog(dateStr, workout) {
+    if (!workout || dateStr > todayStr) return
+    if (getEntriesForDate(dateStr).length > 0) return
+    putDraft(buildSession(workout, dateStr, getLastWeightForExercise))
+  }
+
+  function startUpdate(entry) {
+    const workout = resolveFor(entry.date, entry.workoutId)
+    putDraft(sessionFromEntry(workout, entry))
+    focusDate(entry.date)
   }
 
   function openChangePicker(dateStr) {
@@ -193,24 +223,22 @@ export default function TodayPage() {
   function handleChangeWorkout(newWorkoutId) {
     const dateStr = changePickerDate
     assignWorkout(dateStr, newWorkoutId)
-    // If changing today's active workout, rebuild the session
-    if (dateStr === todayStr) {
-      const newWorkout = resolveWorkout(dateStr, settings.programStartDate, { _v: 2, [dateStr]: newWorkoutId }, exerciseSwaps)
-      if (newWorkout) {
-        const sections = newWorkout.sections.map(section => ({
-          sectionId: section.id,
-          exercises: section.exercises.map(ex => sessionExercise(ex, getLastWeightForExercise(ex.id))),
-        }))
-        setActiveSession({ date: todayStr, workoutId: newWorkoutId, workoutName: newWorkout.name, sections, abCompleted: [], abSwaps: {} })
-        setActiveWorkoutTemplate(newWorkout)
-      }
+    const newWorkout = resolveFor(dateStr, newWorkoutId)
+    const current = normalizeDrafts(getDrafts())[dateStr]
+    const editingThisDate = current
+      ? draftForEditing(current, getEntriesForDate(dateStr), todayStr)
+      : null
+    if (newWorkout && (dateStr === todayStr || editingThisDate)) {
+      const next = buildSession(newWorkout, dateStr, getLastWeightForExercise)
+      if (editingThisDate?.updatingEntryId) next.updatingEntryId = editingThisDate.updatingEntryId
+      putDraft(next)
     }
     setShowChangePicker(false)
     setChangePickerDate(null)
   }
 
   function slotTemplate(programId) {
-    for (const section of activeWorkoutTemplate?.sections || []) {
+    for (const section of activeTemplate?.sections || []) {
       const exercise = section.exercises.find(ex => (ex.programId || ex.id) === programId)
       if (exercise) return exercise
     }
@@ -244,11 +272,12 @@ export default function TodayPage() {
   }
 
   function applyLiftToSession(programId, sectionId, exercise) {
+    if (!editorSession) return
     const template = slotTemplate(programId)
     const prescription = template || { sets: exercise.sets, reps: exercise.reps }
-    setActiveSession(prev => {
+    mutateDraft(editorSession.date, prev => {
       if (!prev) return prev
-      return {
+      return markDirty({
         ...prev,
         sections: prev.sections.map(section => {
           if (section.sectionId !== sectionId) return section
@@ -265,29 +294,30 @@ export default function TodayPage() {
                   muscle: exercise.muscle,
                   defaultWeight: exercise.defaultWeight,
                 },
-                getLastWeightForExercise(exercise.id)
+                getLastWeightForExercise(exercise.id),
               )
             }),
           }
         }),
-      }
+      })
     })
   }
 
   function applyAbToSession(programId, exercise) {
-    setActiveSession(prev => {
+    if (!editorSession) return
+    mutateDraft(editorSession.date, prev => {
       if (!prev) return prev
       const previous = prev.abSwaps?.[programId]
-      const templateId = activeWorkoutTemplate?.abCircuit?.exercises?.find(ex => (ex.programId || ex.id) === programId)?.id
+      const templateId = activeTemplate?.abCircuit?.exercises?.find(ex => (ex.programId || ex.id) === programId)?.id
       const drop = new Set([programId, previous?.id, templateId].filter(Boolean))
-      return {
+      return markDirty({
         ...prev,
         abCompleted: (prev.abCompleted || []).filter(id => !drop.has(id)),
         abSwaps: {
           ...(prev.abSwaps || {}),
           [programId]: { id: exercise.id, name: exercise.name, muscle: exercise.muscle },
         },
-      }
+      })
     })
   }
 
@@ -312,47 +342,55 @@ export default function TodayPage() {
     setSwapRequest(null)
   }
 
+  function handleSave() {
+    if (!editorSession) return
+    const date = editorSession.date
+    const active = document.activeElement
+    if (active && typeof active.blur === 'function') active.blur()
+    mutateDraft(date, current => (current ? confirmDraft(current) : current))
+    setFlashDate(date)
+    if (flashTimer.current) window.clearTimeout(flashTimer.current)
+    flashTimer.current = window.setTimeout(() => setFlashDate(current => (current === date ? null : current)), 2000)
+  }
+
   function finishWorkout() {
-    if (!activeSession) return
-    const allExercises = activeSession.sections.flatMap(s =>
-      s.exercises.map(e => ({ ...e, section: s.sectionId, sets: e.sets.filter(set => set.completed) }))
-    )
-    addEntry({
-      date: todayStr,
-      workoutId: activeSession.workoutId,
-      workoutName: activeSession.workoutName ?? todayWorkout?.name,
-      exercises: allExercises,
-      abCompleted: activeSession.abCompleted,
-      weekNum: currentWeek,
-      phase: currentPhase?.id,
-    })
-    setCompletedWorkoutName(activeSession.workoutName ?? todayWorkout?.name ?? 'Workout')
-    setActiveSession(null)
+    if (!editorSession) return
+    const active = document.activeElement
+    if (active && typeof active.blur === 'function') active.blur()
+    const session = normalizeDrafts(getDrafts())[editorSession.date]
+    if (!session) return
+    const entries = getEntriesForDate(session.date)
+    const plan = finishPlan(session, entries, todayStr)
+    if (plan.action === 'blocked') {
+      setWarning('This day already has a saved workout. Review it before changing it.')
+      return
+    }
+    const workout = resolveFor(session.date, session.workoutId) || activeTemplate
+    const weekNum = workout?.weekNum ?? programWeek(settings.programStartDate, session.date)
+    const phaseId = workout?.phase?.id ?? (weekNum ? getPhase(weekNum)?.id ?? null : null)
+    const payload = entryFromSession(session, { weekNum, phaseId })
+    if (plan.action === 'replace') {
+      const updated = replaceEntryForDate(plan.entryId, payload)
+      if (!updated) {
+        setWarning('This day already has a saved workout. Review it before changing it.')
+        return
+      }
+    } else {
+      addEntry(payload)
+    }
+    clearDraft(session.date)
+    setCompletedWorkoutName(payload.workoutName || 'Workout')
+    setCompletedDateLabel(session.date === todayStr ? '' : friendlyDate(session.date))
+    setCompletedAsUpdate(plan.action === 'replace')
+    setWarning(null)
     setShowComplete(true)
   }
 
-  const displayAbCircuit = useMemo(() => {
-    const circuit = activeWorkoutTemplate?.abCircuit
-    if (!circuit) return null
-    const overrides = activeSession?.abSwaps || {}
-    return {
-      ...circuit,
-      exercises: circuit.exercises.map(ex => {
-        const programId = ex.programId || ex.id
-        const override = overrides[programId]
-        if (!override) return { ...ex, programId }
-        return {
-          ...ex,
-          programId,
-          id: override.id,
-          name: override.name,
-          muscle: override.muscle || ex.muscle,
-          notes: override.id === programId ? ex.notes : undefined,
-          swapped: override.id !== programId,
-        }
-      }),
-    }
-  }, [activeWorkoutTemplate, activeSession])
+  function lastWeekWeightFor(exerciseId) {
+    const weekNum = activeTemplate?.weekNum || currentWeek
+    if (!weekNum || weekNum <= 1) return null
+    return getWeightForExerciseInWeek(exerciseId, weekNum - 1)
+  }
 
   const swapChoices = useMemo(() => {
     if (!swapRequest) return { builtIn: [], custom: [] }
@@ -377,10 +415,18 @@ export default function TodayPage() {
     return { builtIn, custom }
   }, [swapRequest, customExercises, getLastWeightForExercise])
 
-  const completedSetCount = activeSession
-    ? activeSession.sections.flatMap(s => s.exercises.flatMap(e => e.sets)).filter(s => s.completed).length : 0
-  const totalSetCount = activeSession
-    ? activeSession.sections.flatMap(s => s.exercises.flatMap(e => e.sets)).length : 0
+  const parked = parkedPastDraft(drafts, todayStr)
+  const pickerWeek = changePickerDate ? programWeek(settings.programStartDate, changePickerDate) : null
+  const pickerPhase = pickerWeek ? getPhase(pickerWeek) : currentPhase
+  const pastDay = selectedDate < todayStr
+  const editingUpdate = Boolean(editorSession?.updatingEntryId)
+  const canGoBack = Boolean(
+    editorSession
+    && pastDay
+    && !editingUpdate
+    && !editorSession.dirty
+    && !editorSession.confirmedAt
+  )
 
   if (isProgramComplete) {
     return (
@@ -396,7 +442,6 @@ export default function TodayPage() {
 
   return (
     <PageWrapper>
-      {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
           <p className="text-[10px] font-mono font-bold tracking-[0.4em] uppercase text-muted">
@@ -419,28 +464,68 @@ export default function TodayPage() {
         getEntryForDate={getEntryForDate}
       />
 
-      {/* Day navigator */}
       <DayNav
         centerDate={dayNavCenterDate}
         selectedDate={selectedDate}
-        onSelect={setSelectedDate}
+        onSelect={setPickedDate}
         isCompletedDate={isCompletedDate}
         completedWorkoutLabels={completedWorkoutLabels}
         onWeekShift={handleDayNavWeekShift}
         weekOffsetFromToday={dayNavWeekOffset}
       />
 
-      {/* ── PREVIEW MODE: viewing another day ── */}
-      {!isViewingToday && (
+      {isViewingToday && parked && (
+        <button
+          type="button"
+          onClick={() => focusDate(parked.date)}
+          className="w-full text-left border px-4 py-3 mb-4 active:opacity-70"
+          style={{ borderColor: '#3a0000', background: '#0a0000' }}
+        >
+          <p className="text-xs font-mono text-white">{friendlyDate(parked.date)} is still open.</p>
+          <p className="text-[10px] font-mono text-primary mt-1 tracking-widest uppercase">Tap to finish it</p>
+        </button>
+      )}
+
+      {editorSession && activeTemplate && (
+        <WorkoutLogger
+          key={editorSession.date + (editorSession.updatingEntryId || '')}
+          template={activeTemplate}
+          session={editorSession}
+          dateLabel={pastDay ? friendlyDate(selectedDate) : null}
+          resumed={resumedOnOpen.has(editorSession.date)}
+          updating={editingUpdate}
+          saveFlash={flashDate === editorSession.date}
+          warning={warning}
+          onSave={handleSave}
+          onFinish={finishWorkout}
+          onBack={canGoBack ? () => clearDraft(editorSession.date) : null}
+          onCancelUpdate={editingUpdate ? () => clearDraft(editorSession.date) : null}
+          onChangeWorkout={editingUpdate ? null : () => openChangePicker(editorSession.date)}
+          onSetsChange={updateExerciseSets}
+          onToggleAb={toggleAb}
+          onSwapLift={openLiftSwap}
+          onSwapAb={openAbSwap}
+          lastWeightFor={getLastWeightForExercise}
+          lastWeekWeightFor={lastWeekWeightFor}
+        />
+      )}
+
+      {!isViewingToday && !editorSession && selectedEntries.length > 0 && (
+        <LoggedWorkoutReview entries={selectedEntries} onUpdate={startUpdate} />
+      )}
+
+      {!isViewingToday && !editorSession && selectedEntries.length === 0 && (
         previewWorkout ? (
           <>
             <WorkoutPreview
               workout={previewWorkout}
               completed={previewCompleted}
-              onDoToday={(workout) => handleDoToday(workout, selectedDate)}
+              onDoToday={handleDoToday}
+              onLogDay={pastDay ? (workout) => startLog(selectedDate, workout) : null}
             />
             {!previewCompleted && (
               <button
+                type="button"
                 onClick={() => openChangePicker(selectedDate)}
                 className="w-full text-[10px] font-mono font-bold tracking-widest uppercase py-3 active:opacity-60"
                 style={{ color: '#333' }}
@@ -457,162 +542,48 @@ export default function TodayPage() {
                 {REST_DAY_MESSAGES[new Date().getDay() % REST_DAY_MESSAGES.length]}
               </p>
             </div>
-            <WorkoutPicker workouts={dayNavWorkouts} onSelect={handleDoToday} />
+            <WorkoutPicker
+              workouts={dayNavWorkouts}
+              onSelect={pastDay ? (workout) => startLog(selectedDate, workout) : handleDoToday}
+              label={pastDay ? 'LOG A WORKOUT FOR THIS DAY' : 'START A WORKOUT'}
+            />
           </div>
         )
       )}
 
-      {/* ── TODAY MODE ── */}
-      {isViewingToday && (
-        <>
-          {/* Rest day — no scheduled workout and no active session */}
-          {!isTodayWorkoutDay && !activeSession && (
-            <div>
-              <div className="text-center py-8">
-                <p className="text-[10px] font-mono font-bold tracking-[0.5em] text-primary mb-2">REST DAY</p>
-                <p className="text-xs font-mono text-muted max-w-xs mx-auto">
-                  {REST_DAY_MESSAGES[new Date().getDay() % REST_DAY_MESSAGES.length]}
-                </p>
-              </div>
-              <WorkoutPicker workouts={dayNavWorkouts} onSelect={handleDoToday} />
-            </div>
-          )}
-
-          {/* Already done */}
-          {isTodayWorkoutDay && alreadyDone && (
-            <div>
-              <div className="text-center py-8">
-                <p className="text-[10px] font-mono font-bold tracking-[0.5em] text-primary mb-2">COMPLETE</p>
-                <p className="text-xs font-mono text-muted mb-0.5">
-                  {todayEntry?.exercises?.reduce((sum, e) => sum + e.sets.length, 0) ?? 0} SETS LOGGED
-                </p>
-                <p className="text-xs font-mono" style={{ color: '#333' }}>EAT. SLEEP. RECOVER.</p>
-              </div>
-              <WorkoutPicker workouts={dayNavWorkouts} onSelect={handleDoToday} label="DO ANOTHER WORKOUT" />
-            </div>
-          )}
-
-          {/* Active workout */}
-          {activeWorkoutTemplate && activeSession && (
-            <>
-              <div className="mb-5 flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <h1 className="text-lg font-mono font-black text-white uppercase tracking-wide">{activeWorkoutTemplate.name}</h1>
-                  {currentPhase && <p className="text-[10px] font-mono text-muted mt-0.5 tracking-widest">{currentPhase.tip}</p>}
-                </div>
-                {!alreadyDone && (
-                  <button
-                    onClick={() => openChangePicker(todayStr)}
-                    className="flex-shrink-0 text-[9px] font-mono font-bold tracking-widest uppercase border px-2.5 py-1.5 active:opacity-60"
-                    style={{ borderColor: '#1a1a1a', color: '#444' }}
-                  >
-                    CHANGE
-                  </button>
-                )}
-              </div>
-
-              {/* Progress bar */}
-              <div className="mb-5">
-                <div className="flex justify-between text-[10px] font-mono text-muted mb-1.5">
-                  <span>{completedSetCount} / {totalSetCount} SETS</span>
-                  <span>{totalSetCount > 0 ? Math.round((completedSetCount / totalSetCount) * 100) : 0}%</span>
-                </div>
-                <div className="h-px overflow-hidden" style={{ background: '#1a1a1a' }}>
-                  <div
-                    className="h-full transition-all duration-300"
-                    style={{
-                      width: totalSetCount > 0 ? `${(completedSetCount / totalSetCount) * 100}%` : '0%',
-                      background: '#DC2626',
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Sections with exercise cards */}
-              {activeWorkoutTemplate.sections.map(sectionTemplate => {
-                const sessionSection = activeSession.sections.find(s => s.sectionId === sectionTemplate.id)
-                if (!sessionSection) return null
-                return (
-                  <div key={sectionTemplate.id} className="mb-5">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="h-px flex-1" style={{ background: sectionTemplate.optional ? '#1a1a1a' : '#DC2626', opacity: 0.4 }} />
-                      <span className={`text-[10px] font-mono font-black tracking-[0.4em] uppercase ${sectionTemplate.optional ? 'text-muted' : 'text-primary'}`}>
-                        {sectionTemplate.label}
-                      </span>
-                      <div className="h-px flex-1" style={{ background: sectionTemplate.optional ? '#1a1a1a' : '#DC2626', opacity: 0.4 }} />
-                    </div>
-                    {sectionTemplate.sublabel && (
-                      <p className="text-xs font-mono text-muted text-center mb-3">{sectionTemplate.sublabel}</p>
-                    )}
-                    <div className="space-y-3">
-                      {sectionTemplate.exercises.map(exTemplate => {
-                        const slotId = exTemplate.programId || exTemplate.id
-                        const sessionEx = sessionSection.exercises.find(e => (e.programId || e.id) === slotId)
-                        if (!sessionEx) return null
-                        const exercise = {
-                          ...exTemplate,
-                          id: sessionEx.id,
-                          name: sessionEx.name,
-                          muscle: sessionEx.muscle || exTemplate.muscle,
-                          defaultWeight: sessionEx.defaultWeight ?? exTemplate.defaultWeight,
-                          programId: slotId,
-                          swapped: sessionEx.id !== slotId,
-                          notes: sessionEx.id === slotId ? exTemplate.notes : null,
-                        }
-                        return (
-                          <ExerciseCard
-                            key={slotId}
-                            exercise={exercise}
-                            sets={sessionEx.sets}
-                            onSetsChange={(sets) => updateExerciseSets(sectionTemplate.id, slotId, sets)}
-                            lastWeight={getLastWeightForExercise(exercise.id)}
-                            lastWeekWeight={currentWeek > 1 ? getWeightForExerciseInWeek(exercise.id, currentWeek - 1) : null}
-                            onSwap={() => openLiftSwap(sectionTemplate.id, exercise)}
-                          />
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-
-              {/* Ab Circuit */}
-              <div className="flex items-center gap-2 mb-3">
-                <div className="h-px flex-1" style={{ background: '#1a1a1a' }} />
-                <span className="text-[10px] font-mono font-black tracking-[0.4em] uppercase text-muted">
-                  AB CIRCUIT {activeWorkoutTemplate.abCircuit?.id}
-                </span>
-                <div className="h-px flex-1" style={{ background: '#1a1a1a' }} />
-              </div>
-              <p className="text-xs font-mono text-muted text-center mb-3">5 MIN — ALWAYS DO THIS</p>
-              <div className="mb-6">
-                <AbCircuitSection
-                  circuit={displayAbCircuit}
-                  completed={activeSession.abCompleted}
-                  onToggle={toggleAb}
-                  onSwap={openAbSwap}
-                />
-              </div>
-
-              <button
-                onClick={finishWorkout}
-                className="w-full border border-primary text-primary font-mono font-black text-sm py-4 tracking-[0.4em] uppercase active:opacity-70 transition-opacity"
-              >
-                FINISH SESSION
-              </button>
-            </>
-          )}
-        </>
+      {isViewingToday && !editorSession && !isTodayWorkoutDay && (
+        <div>
+          <div className="text-center py-8">
+            <p className="text-[10px] font-mono font-bold tracking-[0.5em] text-primary mb-2">REST DAY</p>
+            <p className="text-xs font-mono text-muted max-w-xs mx-auto">
+              {REST_DAY_MESSAGES[new Date().getDay() % REST_DAY_MESSAGES.length]}
+            </p>
+          </div>
+          <WorkoutPicker workouts={dayNavWorkouts} onSelect={handleDoToday} />
+        </div>
       )}
 
-      {showChangePicker && currentPhase && (
+      {isViewingToday && !editorSession && isTodayWorkoutDay && alreadyDone && (
+        <div>
+          <div className="text-center py-8">
+            <p className="text-[10px] font-mono font-bold tracking-[0.5em] text-primary mb-2">COMPLETE</p>
+            <p className="text-xs font-mono text-muted mb-0.5">
+              {todayEntries.reduce((sum, entry) => sum + (entry.exercises?.reduce((sets, exercise) => sets + exercise.sets.length, 0) ?? 0), 0)} SETS LOGGED
+            </p>
+            <p className="text-xs font-mono" style={{ color: '#333' }}>EAT. SLEEP. RECOVER.</p>
+          </div>
+          <div className="mb-6">
+            <LoggedWorkoutReview entries={todayEntries} onUpdate={startUpdate} />
+          </div>
+          <WorkoutPicker workouts={dayNavWorkouts} onSelect={handleDoToday} label="DO ANOTHER WORKOUT" />
+        </div>
+      )}
+
+      {showChangePicker && pickerPhase && (
         <WorkoutChangePicker
-          phaseId={currentPhase.id}
-          phaseName={currentPhase.name}
-          currentWorkoutId={changePickerDate === todayStr ? activeWorkoutTemplate?.id : previewWorkout?.id}
-          programStartDate={settings.programStartDate}
-          dateStr={changePickerDate}
-          scheduleOverrides={scheduleOverrides}
+          phaseId={pickerPhase.id}
+          phaseName={pickerPhase.name}
+          currentWorkoutId={(changePickerDate && normalizeDrafts(drafts)[changePickerDate]?.workoutId) || previewWorkout?.id}
           onSelect={handleChangeWorkout}
           onClose={() => { setShowChangePicker(false); setChangePickerDate(null) }}
         />
@@ -634,11 +605,23 @@ export default function TodayPage() {
         <WorkoutCompleteModal
           streak={streak}
           workoutName={completedWorkoutName ?? 'Workout'}
+          updated={completedAsUpdate}
+          dateLabel={completedDateLabel}
           onClose={() => setShowComplete(false)}
         />
       )}
     </PageWrapper>
   )
+}
+
+function templateMatchesSession(template, session) {
+  const templateSlots = (template.sections || []).flatMap(section => (
+    (section.exercises || []).map(exercise => `${section.id}:${exercise.programId || exercise.id}`)
+  ))
+  const sessionSlots = (session.sections || []).flatMap(section => (
+    (section.exercises || []).map(exercise => `${section.sectionId}:${exercise.programId || exercise.id}`)
+  ))
+  return templateSlots.join('|') === sessionSlots.join('|')
 }
 
 function WorkoutChangePicker({ phaseId, phaseName, currentWorkoutId, onSelect, onClose }) {
@@ -647,7 +630,7 @@ function WorkoutChangePicker({ phaseId, phaseName, currentWorkoutId, onSelect, o
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col justify-end"
+      className="fixed inset-0 z-[80] flex flex-col justify-end"
       style={{ background: 'rgba(0,0,0,0.85)' }}
       onClick={onClose}
     >
@@ -660,12 +643,13 @@ function WorkoutChangePicker({ phaseId, phaseName, currentWorkoutId, onSelect, o
           <p className="text-[10px] font-mono font-bold tracking-[0.4em] uppercase" style={{ color: '#DC2626' }}>
             CHANGE WORKOUT — {phaseName}
           </p>
-          <button onClick={onClose} className="text-muted text-xs font-mono">✕</button>
+          <button type="button" onClick={onClose} className="text-muted text-xs font-mono">✕</button>
         </div>
         <div className="space-y-2">
           {all.map(w => (
             <button
               key={w.id}
+              type="button"
               onClick={() => onSelect(w.id)}
               className="w-full flex items-center justify-between border px-4 py-3 text-left active:opacity-60"
               style={{
@@ -705,6 +689,7 @@ function WorkoutPicker({ workouts, onSelect, label = 'START A WORKOUT' }) {
         {items.map(([dateStr, workout]) => (
           <button
             key={dateStr}
+            type="button"
             onClick={() => onSelect(workout, dateStr)}
             className="w-full flex items-center justify-between border px-4 py-4 text-left active:opacity-60 transition-opacity"
             style={{ borderColor: '#1a1a1a', background: '#0d0d0d' }}

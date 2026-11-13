@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { useLocalStorage } from './useLocalStorage'
 import { today } from '../utils/dateUtils'
+import { replaceLogEntry } from '../utils/workoutSession'
 
 export function useWorkoutLog() {
   // ⚠️ SACRED KEY — 'wt_log' stores all workout history.
@@ -21,6 +22,22 @@ export function useWorkoutLog() {
   const getEntryForDate = useCallback((dateStr) => {
     return log.find(e => e.date === dateStr) || null
   }, [log])
+
+  const getEntriesForDate = useCallback((dateStr) => {
+    return log.filter(e => e.date === dateStr)
+  }, [log])
+
+  // Replaces one saved workout by id. Does nothing when that workout is gone,
+  // so a finish can never create a second copy by accident.
+  const replaceEntryForDate = useCallback((entryId, updates) => {
+    let updated = null
+    setLog(prev => {
+      const result = replaceLogEntry(prev, entryId, updates)
+      updated = result.updated
+      return result.updated ? result.log : prev
+    })
+    return updated
+  }, [setLog])
 
   const getEntriesForWorkout = useCallback((workoutId) => {
     return log.filter(e => e.workoutId === workoutId).sort((a, b) => a.date.localeCompare(b.date))
@@ -74,7 +91,9 @@ export function useWorkoutLog() {
     log,
     recentEntries,
     addEntry,
+    replaceEntryForDate,
     getEntryForDate,
+    getEntriesForDate,
     getEntriesForWorkout,
     getLastWeightForExercise,
     getWeightForExerciseInWeek,
